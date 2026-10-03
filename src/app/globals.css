@@ -1,26 +1,214 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@theme {
+  /* Palette — dark "engineering console" look */
+  --color-ink: #06090f;
+  --color-panel: #0b111a;
+  --color-panel-2: #101827;
+  --color-line: #1d2837;
+  --color-mist: #93a4ba;
+  --color-chalk: #e7eef8;
+  --color-accent: #34d399;
+  --color-sky: #38bdf8;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-ink);
+  background-image:
+    radial-gradient(ellipse 70% 45% at 50% -10%, rgba(52, 211, 153, 0.13), transparent),
+    radial-gradient(ellipse 50% 35% at 85% 10%, rgba(56, 189, 248, 0.07), transparent);
+  background-repeat: no-repeat;
+  color: var(--color-chalk);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(52, 211, 153, 0.3);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Building blocks shared by all screens ------------------------------- */
+
+.card {
+  border: 1px solid var(--color-line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-panel) 78%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 12px;
+  padding: 0.7rem 1.3rem;
+  font-size: 0.925rem;
+  font-weight: 600;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+  cursor: pointer;
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-accent {
+  background: linear-gradient(135deg, #34d399, #10b981);
+  color: #04120c;
+  box-shadow: 0 8px 24px -10px rgba(52, 211, 153, 0.7);
+}
+
+.btn-accent:hover:not(:disabled) {
+  box-shadow: 0 10px 30px -10px rgba(52, 211, 153, 0.9);
+}
+
+.btn-ghost {
+  border: 1px solid var(--color-line);
+  background: color-mix(in srgb, var(--color-panel-2) 70%, transparent);
+  color: var(--color-chalk);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-line));
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-panel-2) 65%, transparent);
+  padding: 0.42rem 0.85rem;
+  font-size: 0.85rem;
+  color: var(--color-mist);
+  transition: all 0.14s ease;
+  cursor: pointer;
+  user-select: none;
+}
+
+.chip:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-line));
+  color: var(--color-chalk);
+}
+
+.chip-on {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--color-accent);
+}
+
+.chip-static {
+  cursor: default;
+}
+
+.chip-static:hover {
+  border-color: var(--color-line);
+  color: var(--color-mist);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-sky) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-sky) 28%, transparent);
+  padding: 0.24rem 0.6rem;
+  font-size: 0.78rem;
+  color: #bfe6fb;
+}
+
+.field {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-panel-2) 75%, transparent);
+  padding: 0.7rem 0.9rem;
+  font-size: 0.95rem;
+  color: var(--color-chalk);
+}
+
+.field::placeholder {
+  color: color-mix(in srgb, var(--color-mist) 75%, transparent);
+}
+
+.field:focus {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-line));
+}
+
+.label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-mist);
+  margin-bottom: 0.6rem;
+}
+
+/* Week slider ------------------------------------------------------------ */
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) 0%,
+    var(--color-accent) var(--range-pct, 20%),
+    var(--color-line) var(--range-pct, 20%),
+    var(--color-line) 100%
+  );
+  outline-offset: 6px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 3px solid var(--color-ink);
+  box-shadow: 0 0 0 1px var(--color-accent), 0 0 14px rgba(52, 211, 153, 0.6);
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 3px solid var(--color-ink);
+  cursor: pointer;
+}
+
+/* Scrollbar -------------------------------------------------------------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
 }

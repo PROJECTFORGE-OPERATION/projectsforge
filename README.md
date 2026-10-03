@@ -1,36 +1,118 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ProjectsForge — Hackathon MVP
 
-## Getting Started
+> From project ideas to career-ready skills.
 
-First, run the development server:
+A focused hackathon prototype: **student profile → personalized project recommendation → skill gap → week-by-week roadmap**. One strong working journey, powered by a real local LLM — no canned demo data, no fallback mode.
+
+## Stack
+
+- **Next.js 16** (App Router, Turbopack) + TypeScript + Tailwind CSS v4
+- **Ollama** local LLM (`phi4-gpu` by default) with **JSON-schema-constrained output**
+- **zod** validation on every model reply, with one corrective retry
+- **Curated dataset** of 16 project records that grounds the model (it may only recommend ids from the shortlist)
+
+## Prerequisites
+
+1. [Ollama](https://ollama.com) installed and running (`ollama serve`)
+2. A model pulled: `ollama pull phi4-gpu` (or `qwen3:4b`, `phi4-mini`…)
+3. Node.js 20.9+
+
+## Run
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000 — the header badge shows the **real** engine status.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Configuration (`.env.local`)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable           | Default                   | Purpose                       |
+| ------------------ | ------------------------- | ----------------------------- |
+| `OLLAMA_HOST`      | `http://127.0.0.1:11434`  | Ollama server URL             |
+| `OLLAMA_MODEL`     | `phi4-gpu`                | Model used for analysis       |
+| `OLLAMA_TIMEOUT_MS`| `180000`                  | Per-request model timeout     |
 
-## Learn More
+## API
 
-To learn more about Next.js, take a look at the following resources:
+### `POST /api/analyze`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```jsonc
+{
+  "branch": "CSE",
+  "year": "1st year",
+  "skills": ["Python", "HTML/CSS"],
+  "interests": ["AI / ML", "Web Development"],
+  "careerGoal": "Placement / Job",
+  "availableWeeks": 4
+}
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**200** → `{ profile, analysis, model, candidateCount, elapsedMs }`
 
-## Deploy on Vercel
+`analysis` contains `primary`, `alternatives` (2–3), `skillGap`, `roadmap` (exactly `availableWeeks` entries), `nextStep`, `risks`, `assumptions`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+**Failure modes (deliberately loud — there is no canned fallback):**
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Status | Meaning                                                       |
+| ------ | ------------------------------------------------------------- |
+| 400    | Invalid profile (zod issues returned)                         |
+| 502    | Model returned invalid JSON/structure twice                   |
+| 503    | Ollama unreachable — start it with `ollama serve`             |
+| 504    | Model timed out                                               |
+
+### `GET /api/health`
+
+Real liveness of the local engine: `{ ok, model, modelPresent }`.
+
+## How the "zero fallback" AI layer works
+
+```
+profile ──► deterministic candidate ranking (top 8 of 16 records)
+                 │
+                 ▼
+        prompt + zod-derived JSON schema
+                 │
+                 ▼
+        Ollama /api/chat (format: <schema>)   ← constrained decoding
+                 │
+                 ▼
+        zod parse + business rules ──fail──► corrective retry (once)
+                 │                              │
+               pass                          fail
+                 │                              │
+                 ▼                              ▼
+              200 OK                    502 with precise reason
+```
+
+- The JSON schema sent to Ollama is **generated from the zod schema** (`z.toJSONSchema`), so the contract has a single source of truth.
+- Business rules (ids must exist in the dataset, unique alternatives, roadmap length, non-empty skill gap) run after zod and also trigger retries.
+- If the engine is down, the UI shows the exact error — it never silently swaps in fake results.
+
+## Demo script (per the roadmap)
+
+1. **Landing** → value proposition + live engine badge.
+2. **Profile** → enter a 1st-year CSE-IoT student, 2–3 skills, 4 weeks.
+3. **Recommendation** → primary project + match score + *why this project* + 2–3 alternatives.
+4. **Skill Gap** → existing skills (echoed from the form) vs. skills to learn with priorities.
+5. **Roadmap** → exactly N weeks of learn/build/deliverable, plus honest risks & assumptions.
+
+**Personalization proof:** change one field (e.g. 4 → 12 weeks, or add "Arduino") and re-run — the recommendation, skill gap and roadmap visibly change.
+
+## Team split
+
+| You (Product/Frontend/Pitch) | Teammate (AI/Backend) |
+| ---------------------------- | --------------------- |
+| Screens, flow, story          | `src/lib/ollama.ts`, `src/lib/prompt.ts` |
+| Demo choreography            | Prompt rules, dataset tuning in `src/lib/projects.ts` |
+| Judge Q&A                    | Failure modes (502/503/504) explanation |
+
+## Scripts
+
+```bash
+npm run dev      # dev server (Turbopack)
+npm run build    # production build (type-checked)
+npm run start    # serve the production build
+npm run lint     # eslint
+```
