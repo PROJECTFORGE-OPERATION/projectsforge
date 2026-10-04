@@ -67,16 +67,23 @@ and loud 502/503/504 on failure — never canned data. For a hosted deploy
 
 **Failure modes (deliberately loud — there is no canned fallback):**
 
-| Status | Meaning                                                       |
-| ------ | ------------------------------------------------------------- |
-| 400    | Invalid profile (zod issues returned)                         |
-| 502    | Model returned invalid JSON/structure twice                   |
-| 503    | Ollama unreachable — start it with `ollama serve`             |
-| 504    | Model timed out                                               |
+| Status | Meaning                                                                                     |
+| ------ | ------------------------------------------------------------------------------------------- |
+| 400    | Invalid profile (zod issues returned)                                                       |
+| 502    | Model returned invalid JSON/structure twice                                                 |
+| 503    | Engine unreachable/rejected — Ollama down, Gemini key rejected, or upstream 5xx after retries |
+| 504    | Model timed out                                                                             |
 
 ### `GET /api/health`
 
-Real liveness of the local engine: `{ ok, model, modelPresent }`.
+Real liveness of the active engine: `{ ok, provider, model, region, modelPresent }`
+(`provider` is `ollama` or `gemini`; `region` is the Vercel function region or `local`).
+
+### `GET /api/pingai` *(diagnostics)*
+
+Probes the active Gemini model twice from the server's own egress — one plain
+call, one JSON-schema-constrained call — and reports status + latency for each.
+Useful for distinguishing "engine down" from "structured-output mode rejected".
 
 ## How the "zero fallback" AI layer works
 
@@ -87,7 +94,11 @@ profile ──► deterministic candidate ranking (top 8 of 16 records)
         prompt + zod-derived JSON schema
                  │
                  ▼
-        Ollama /api/chat (format: <schema>)   ← constrained decoding
+        Ollama /api/chat (format: <schema>)        ← constrained decoding
+        Gemini  generateContent (responseSchema)   ← structured output
+                 │   (if upstream 5xx's structured mode — e.g. from
+                 │    datacenter IPs — retry is prompt-enforced JSON;
+                 │    the zod gate below is identical either way)
                  │
                  ▼
         zod parse + business rules ──fail──► corrective retry (once)
@@ -98,7 +109,7 @@ profile ──► deterministic candidate ranking (top 8 of 16 records)
               200 OK                    502 with precise reason
 ```
 
-- The JSON schema sent to Ollama is **generated from the zod schema** (`z.toJSONSchema`), so the contract has a single source of truth.
+- The JSON schema sent to the engine is **generated from the zod schema** (`z.toJSONSchema`), so the contract has a single source of truth.
 - Business rules (ids must exist in the dataset, unique alternatives, roadmap length, non-empty skill gap) run after zod and also trigger retries.
 - If the engine is down, the UI shows the exact error — it never silently swaps in fake results.
 
