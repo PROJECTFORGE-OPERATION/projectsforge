@@ -344,8 +344,18 @@ async function requestGemini(
       parts: [{ text: m.content }],
     }));
 
+  // Call sequence: structured (responseSchema) first — if the upstream 5xx's
+  // it (Google's constrained-decoding capacity rejects datacenter egress),
+  // switch to prompt-enforced JSON. The zod + business-rule retry loop in
+  // chatStructured validates BOTH paths identically — no canned data ever.
+  let plainMode = false;
+  const PLAIN_RULE =
+    "\n\nOUTPUT FORMAT: Reply with ONLY the raw JSON object that satisfies all rules above. No markdown, no code fences, no commentary before or after.";
+  const MAX_CALLS = 3;
+
   let response: Response;
   for (let call = 1; ; call++) {
+    const instruction = plainMode ? system + PLAIN_RULE : system;
     try {
       response = await fetch(`${GEMINI_BASE}/${GEMINI_MODEL}:generateContent`, {
         method: "POST",
@@ -354,14 +364,18 @@ async function requestGemini(
           "x-goog-api-key": GEMINI_KEY,
         },
         body: JSON.stringify({
-          ...(system
-            ? { systemInstruction: { parts: [{ text: system }] } }
+          ...(instruction
+            ? { systemInstruction: { parts: [{ text: instruction }] } }
             : {}),
           contents,
           generationConfig: {
             temperature: 0.35,
-            responseMimeType: "application/json",
-            responseSchema: toGeminiSchema(format),
+            ...(plainMode
+              ? {}
+              : {
+                  responseMimeType: "application/json",
+                  responseSchema: toGeminiSchema(format),
+                }),
           },
         }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -384,10 +398,18 @@ async function requestGemini(
 
     if (response.ok) break;
 
-    // Upstream 5xx (e.g. "high demand") is transient — one real retry of the
-    // SAME engine, never canned data. Everything else fails loudly at once.
-    if (response.status >= 500 && call < 2) {
-      console.log(`[gemini] upstream ${response.status}, retrying once...`);
+    // Upstream 5xx (e.g. "high demand") — retry the SAME engine, never canned
+    // data: first by dropping structured-output mode (known to be rejected
+    // from datacenter IPs), then in plain mode. Anything else fails at once.
+    if (response.status >= 500 && call < MAX_CALLS) {
+      if (!plainMode) {
+        plainMode = true;
+        console.log(
+          `[gemini] upstream ${response.status} in structured mode — switching to prompt-enforced JSON`,
+        );
+      } else {
+        console.log(`[gemini] upstream ${response.status}, retrying plain...`);
+      }
       await new Promise((resolve) => setTimeout(resolve, 2000));
       continue;
     }
