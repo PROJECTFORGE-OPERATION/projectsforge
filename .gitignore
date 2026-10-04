@@ -42,3 +42,5 @@ next-env.d.ts
 
 # pitch deck build artifacts (unpacked pptx working tree)
 pitch/unpacked/
+.vercel
+.env*
