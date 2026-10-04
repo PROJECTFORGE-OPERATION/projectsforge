@@ -7,7 +7,7 @@ A focused hackathon prototype: **student profile → personalized project recomm
 ## Stack
 
 - **Next.js 16** (App Router, Turbopack) + TypeScript + Tailwind CSS v4
-- **Ollama** local LLM (`phi4-gpu` by default) with **JSON-schema-constrained output**
+- **Dual-mode AI layer** — local **Ollama** (`phi4-gpu` by default) or cloud **Gemini** (`gemini-3.8-flash`), selected by env, both with **JSON-schema-constrained output**
 - **zod** validation on every model reply, with one corrective retry
 - **Curated dataset** of 16 project records that grounds the model (it may only recommend ids from the shortlist)
 
@@ -16,6 +16,7 @@ A focused hackathon prototype: **student profile → personalized project recomm
 1. [Ollama](https://ollama.com) installed and running (`ollama serve`)
 2. A model pulled: `ollama pull phi4-gpu` (or `qwen3:4b`, `phi4-mini`…)
 3. Node.js 20.9+
+4. *(Optional, cloud mode)* a [Gemini API key](https://aistudio.google.com/apikey)
 
 ## Run
 
@@ -28,11 +29,20 @@ Open http://localhost:3000 — the header badge shows the **real** engine status
 
 ### Configuration (`.env.local`)
 
-| Variable           | Default                   | Purpose                       |
-| ------------------ | ------------------------- | ----------------------------- |
-| `OLLAMA_HOST`      | `http://127.0.0.1:11434`  | Ollama server URL             |
-| `OLLAMA_MODEL`     | `phi4-gpu`                | Model used for analysis       |
-| `OLLAMA_TIMEOUT_MS`| `180000`                  | Per-request model timeout     |
+| Variable            | Default                   | Purpose                                       |
+| ------------------- | ------------------------- | --------------------------------------------- |
+| `OLLAMA_HOST`       | `http://127.0.0.1:11434`  | Ollama server URL                             |
+| `OLLAMA_MODEL`      | `phi4-gpu`                | Local model used when Ollama is active        |
+| `OLLAMA_TIMEOUT_MS` | `180000`                  | Per-request model timeout (both providers)    |
+| `GEMINI_API_KEY`    | *(unset)*                 | **Enables cloud mode** — Gemini replaces Ollama |
+| `GEMINI_MODEL`      | `gemini-3.8-flash`        | Gemini model name                             |
+| `AI_PROVIDER`       | *(auto)*                  | Force `ollama` or `gemini` regardless of key  |
+
+**Provider resolution:** `AI_PROVIDER` wins → else `GEMINI_API_KEY` set means
+Gemini → else local Ollama. Same contract both ways: zod + business-rule retry,
+and loud 502/503/504 on failure — never canned data. For a hosted deploy
+(e.g. Vercel) set `GEMINI_API_KEY`; locally leave it unset to keep the
+"local LLM, no API key" story.
 
 ## API
 

@@ -1,5 +1,5 @@
 import { selectCandidates } from "@/lib/projects";
-import { AiError, OLLAMA_MODEL, chatStructured } from "@/lib/ollama";
+import { ACTIVE_MODEL, PROVIDER, AiError, chatStructured } from "@/lib/ollama";
 import { buildMessages, makeValidator } from "@/lib/prompt";
 import {
   makeAnalysisSchema,
@@ -11,6 +11,8 @@ import {
 } from "@/lib/types";
 
 export const runtime = "nodejs";
+/** Vercel function cap — Gemini answers in 5–30s; retry loop fits in 60. */
+export const maxDuration = 60;
 
 function errorResponse(status: number, payload: ErrorResponse): Response {
   return Response.json(payload, { status });
@@ -56,7 +58,8 @@ export async function POST(request: Request): Promise<Response> {
     const response: AnalyzeResponse = {
       profile,
       analysis: normalizeRoadmap(analysis, profile),
-      model: OLLAMA_MODEL,
+      model: ACTIVE_MODEL,
+      provider: PROVIDER,
       candidateCount: candidates.length,
       elapsedMs: Date.now() - startedAt,
     };

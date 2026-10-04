@@ -48,7 +48,7 @@ export default function ResultPage() {
     );
   }
 
-  const { analysis, profile, model, elapsedMs, candidateCount } = run;
+  const { analysis, profile, model, provider, elapsedMs, candidateCount } = run;
 
   return (
     <div className="mx-auto w-full max-w-5xl flex-1 px-6 pb-16">
@@ -142,7 +142,8 @@ export default function ResultPage() {
       {/* Run metadata — transparency for judges */}
       <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4 text-[11px] text-mist">
         <span>
-          Model: <span className="font-mono text-chalk">{model}</span> · local Ollama ·
+          Model: <span className="font-mono text-chalk">{model}</span> ·{" "}
+          {provider === "gemini" ? "Gemini API" : "local Ollama"} ·
           generated in {(elapsedMs / 1000).toFixed(1)}s · {candidateCount} candidate
           projects scored
         </span>

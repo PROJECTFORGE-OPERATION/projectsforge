@@ -1,19 +1,40 @@
 import { z, type ZodType } from "zod";
 
 /**
- * Real AI layer — talks directly to a local Ollama server.
+ * Real AI layer — dual-mode, zero fallback.
  *
- * There is intentionally NO fallback/demo mode here. If Ollama is unreachable
+ * Provider selection (resolved once at module load):
+ *   AI_PROVIDER=ollama|gemini — force a provider (scripts/tests use this)
+ *   otherwise: GEMINI_API_KEY set → Google Gemini (cloud, for hosted deploys)
+ *              no key             → local Ollama (the judge-demo default)
+ *
+ * There is intentionally NO canned/demo mode. If the engine is unreachable
  * or the model produces output that fails validation twice, the request fails
- * loudly with a precise error instead of silently returning canned data.
+ * loudly with a precise error instead of silently returning data.
  */
 
 const OLLAMA_HOST = (process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434").replace(
   /\/+$/,
   "");
 export const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "phi4-gpu";
+export const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.8-flash";
+const GEMINI_KEY = process.env.GEMINI_API_KEY?.trim() || undefined;
 const TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS ?? 180_000);
 const ATTEMPTS = 2;
+
+export type Provider = "ollama" | "gemini";
+
+export const PROVIDER: Provider =
+  process.env.AI_PROVIDER === "ollama"
+    ? "ollama"
+    : process.env.AI_PROVIDER === "gemini"
+      ? "gemini"
+      : GEMINI_KEY
+        ? "gemini"
+        : "ollama";
+
+/** Model name reported to the API/UI for the active provider. */
+export const ACTIVE_MODEL = PROVIDER === "gemini" ? GEMINI_MODEL : OLLAMA_MODEL;
 
 export class AiError extends Error {
   constructor(
@@ -148,7 +169,7 @@ export async function chatStructured<T>(
     const parsed = parseJson(response);
     const log = (message: string) =>
       console.log(
-        `[ollama] attempt ${attempt}/${ATTEMPTS} (${((Date.now() - attemptStart) / 1000).toFixed(1)}s): ${message}`,
+        `[${PROVIDER}] attempt ${attempt}/${ATTEMPTS} (${((Date.now() - attemptStart) / 1000).toFixed(1)}s): ${message}`,
       );
 
     if (parsed === undefined) {
@@ -189,7 +210,7 @@ export async function chatStructured<T>(
   );
 }
 
-async function request(
+async function requestOllama(
   messages: ChatMessage[],
   format: Record<string, unknown>,
 ): Promise<string> {
@@ -246,6 +267,154 @@ async function request(
   return content;
 }
 
+/** One provider call for the active engine — same contract both ways. */
+async function request(
+  messages: ChatMessage[],
+  format: Record<string, unknown>,
+): Promise<string> {
+  return PROVIDER === "gemini"
+    ? requestGemini(messages, format)
+    : requestOllama(messages, format);
+}
+
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+
+/**
+ * Gemini's responseSchema is an OpenAPI subset and rejects a few
+ * JSON-schema keywords outright. Dropping them is safe: every constraint
+ * they encode (e.g. minItems/maxItems roadmap length) is re-enforced by the
+ * zod + business-rule retry loop in chatStructured.
+ */
+function toGeminiSchema(node: unknown): unknown {
+  const drop = new Set([
+    "minItems",
+    "maxItems",
+    "minLength",
+    "maxLength",
+    "pattern",
+    "additionalProperties",
+    "additionalItems",
+    "unevaluatedProperties",
+    "patternProperties",
+    "$ref",
+    "$defs",
+  ]);
+  if (Array.isArray(node)) return node.map(toGeminiSchema);
+  if (!node || typeof node !== "object") return node;
+
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (drop.has(key)) continue;
+    if (key === "properties" && value && typeof value === "object") {
+      const map: Record<string, unknown> = {};
+      for (const [name, sub] of Object.entries(value)) {
+        map[name] = toGeminiSchema(sub);
+      }
+      out[key] = map;
+    } else if (key === "items" || key === "not") {
+      out[key] = toGeminiSchema(value);
+    } else if (key === "anyOf" || key === "oneOf" || key === "allOf") {
+      out[key] = Array.isArray(value) ? value.map(toGeminiSchema) : value;
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+async function requestGemini(
+  messages: ChatMessage[],
+  format: Record<string, unknown>,
+): Promise<string> {
+  if (!GEMINI_KEY) {
+    throw new AiError(
+      "AI_PROVIDER=gemini but GEMINI_API_KEY is not set. Add it to .env.local (or the host's environment variables).",
+      503,
+    );
+  }
+
+  const system = messages
+    .filter((m) => m.role === "system")
+    .map((m) => m.content)
+    .join("\n\n");
+  const contents = messages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    }));
+
+  let response: Response;
+  try {
+    response = await fetch(`${GEMINI_BASE}/${GEMINI_MODEL}:generateContent`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-goog-api-key": GEMINI_KEY,
+      },
+      body: JSON.stringify({
+        ...(system
+          ? { systemInstruction: { parts: [{ text: system }] } }
+          : {}),
+        contents,
+        generationConfig: {
+          temperature: 0.35,
+          responseMimeType: "application/json",
+          responseSchema: toGeminiSchema(format),
+        },
+      }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (cause) {
+    const timedOut =
+      cause instanceof Error &&
+      (cause.name === "TimeoutError" || cause.name === "AbortError");
+    if (timedOut) {
+      throw new AiError(
+        `Gemini did not respond within ${Math.round(TIMEOUT_MS / 1000)}s.`,
+        504,
+      );
+    }
+    throw new AiError(
+      "Cannot reach generativelanguage.googleapis.com — check the network connection.",
+      503,
+    );
+  }
+
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => "")).slice(0, 400);
+    const body = detail || "(no body)";
+    if (response.status === 401 || response.status === 403) {
+      throw new AiError(
+        `Gemini rejected GEMINI_API_KEY (${response.status}): ${body}`,
+        503,
+      );
+    }
+    if (response.status === 429) {
+      throw new AiError(`Gemini rate limit or quota exceeded (429): ${body}`, 503);
+    }
+    throw new AiError(`Gemini responded ${response.status}: ${body}`, 503);
+  }
+
+  const data = (await response.json()) as {
+    promptFeedback?: { blockReason?: string };
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  if (data.promptFeedback?.blockReason) {
+    throw new AiError(
+      `Gemini refused the request: ${data.promptFeedback.blockReason}`,
+      502,
+    );
+  }
+  const text = (data.candidates?.[0]?.content?.parts ?? [])
+    .map((p) => p.text ?? "")
+    .join("");
+  if (text.length === 0) {
+    throw new AiError("Gemini returned an empty response.", 502);
+  }
+  return text;
+}
+
 /** Cheap liveness check used by the header status badge. */
 export async function pingOllama(): Promise<
   { ok: true; models: string[] } | { ok: false; error: string }
@@ -262,4 +431,73 @@ export async function pingOllama(): Promise<
   } catch {
     return { ok: false, error: `No Ollama server at ${OLLAMA_HOST}` };
   }
+}
+
+/**
+ * Real liveness of the ACTIVE provider for the header badge / health route.
+ * Gemini: a free model-metadata lookup (validates key + model name).
+ * Ollama: /api/tags plus a real model-presence check.
+ */
+export async function pingEngine(): Promise<
+  | {
+      ok: true;
+      provider: Provider;
+      model: string;
+      modelPresent: boolean;
+      modelCount?: number;
+    }
+  | { ok: false; provider: Provider; model: string; error: string }
+> {
+  if (PROVIDER === "gemini") {
+    if (!GEMINI_KEY) {
+      return {
+        ok: false,
+        provider: "gemini",
+        model: GEMINI_MODEL,
+        error: "GEMINI_API_KEY is not set",
+      };
+    }
+    try {
+      const response = await fetch(`${GEMINI_BASE}/${GEMINI_MODEL}`, {
+        headers: { "x-goog-api-key": GEMINI_KEY },
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (response.ok) {
+        return {
+          ok: true,
+          provider: "gemini",
+          model: GEMINI_MODEL,
+          modelPresent: true,
+        };
+      }
+      const detail = (await response.text().catch(() => "")).slice(0, 300);
+      return {
+        ok: false,
+        provider: "gemini",
+        model: GEMINI_MODEL,
+        error: `Gemini ${response.status}: ${detail || "(no body)"}`,
+      };
+    } catch {
+      return {
+        ok: false,
+        provider: "gemini",
+        model: GEMINI_MODEL,
+        error: "Cannot reach generativelanguage.googleapis.com",
+      };
+    }
+  }
+
+  const engine = await pingOllama();
+  if (!engine.ok) {
+    return { ok: false, provider: "ollama", model: OLLAMA_MODEL, error: engine.error };
+  }
+  return {
+    ok: true,
+    provider: "ollama",
+    model: OLLAMA_MODEL,
+    modelPresent: engine.models.some(
+      (name) => name === OLLAMA_MODEL || name.startsWith(`${OLLAMA_MODEL}:`),
+    ),
+    modelCount: engine.models.length,
+  };
 }
