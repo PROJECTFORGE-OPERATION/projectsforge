@@ -2,6 +2,8 @@
 
 > From project ideas to career-ready skills.
 
+**🟢 Live demo: https://projectsforge-nu.vercel.app** (Gemini cloud mode) — locally the same app runs on Ollama with no API key (see Configuration).
+
 A focused hackathon prototype: **student profile → personalized project recommendation → skill gap → week-by-week roadmap**. One strong working journey, powered by a real local LLM — no canned demo data, no fallback mode.
 
 ## Stack

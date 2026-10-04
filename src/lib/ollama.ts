@@ -345,43 +345,53 @@ async function requestGemini(
     }));
 
   let response: Response;
-  try {
-    response = await fetch(`${GEMINI_BASE}/${GEMINI_MODEL}:generateContent`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-goog-api-key": GEMINI_KEY,
-      },
-      body: JSON.stringify({
-        ...(system
-          ? { systemInstruction: { parts: [{ text: system }] } }
-          : {}),
-        contents,
-        generationConfig: {
-          temperature: 0.35,
-          responseMimeType: "application/json",
-          responseSchema: toGeminiSchema(format),
+  for (let call = 1; ; call++) {
+    try {
+      response = await fetch(`${GEMINI_BASE}/${GEMINI_MODEL}:generateContent`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-goog-api-key": GEMINI_KEY,
         },
-      }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch (cause) {
-    const timedOut =
-      cause instanceof Error &&
-      (cause.name === "TimeoutError" || cause.name === "AbortError");
-    if (timedOut) {
+        body: JSON.stringify({
+          ...(system
+            ? { systemInstruction: { parts: [{ text: system }] } }
+            : {}),
+          contents,
+          generationConfig: {
+            temperature: 0.35,
+            responseMimeType: "application/json",
+            responseSchema: toGeminiSchema(format),
+          },
+        }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    } catch (cause) {
+      const timedOut =
+        cause instanceof Error &&
+        (cause.name === "TimeoutError" || cause.name === "AbortError");
+      if (timedOut) {
+        throw new AiError(
+          `Gemini did not respond within ${Math.round(TIMEOUT_MS / 1000)}s.`,
+          504,
+        );
+      }
       throw new AiError(
-        `Gemini did not respond within ${Math.round(TIMEOUT_MS / 1000)}s.`,
-        504,
+        "Cannot reach generativelanguage.googleapis.com — check the network connection.",
+        503,
       );
     }
-    throw new AiError(
-      "Cannot reach generativelanguage.googleapis.com — check the network connection.",
-      503,
-    );
-  }
 
-  if (!response.ok) {
+    if (response.ok) break;
+
+    // Upstream 5xx (e.g. "high demand") is transient — one real retry of the
+    // SAME engine, never canned data. Everything else fails loudly at once.
+    if (response.status >= 500 && call < 2) {
+      console.log(`[gemini] upstream ${response.status}, retrying once...`);
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      continue;
+    }
+
     const detail = (await response.text().catch(() => "")).slice(0, 400);
     const body = detail || "(no body)";
     if (response.status === 401 || response.status === 403) {
@@ -396,7 +406,7 @@ async function requestGemini(
     throw new AiError(`Gemini responded ${response.status}: ${body}`, 503);
   }
 
-  const data = (await response.json()) as {
+  const data = (await response.json().catch(() => ({}))) as {
     promptFeedback?: { blockReason?: string };
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
