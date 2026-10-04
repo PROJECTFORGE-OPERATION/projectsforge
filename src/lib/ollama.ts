@@ -322,6 +322,11 @@ function toGeminiSchema(node: unknown): unknown {
   return out;
 }
 
+// Process-local flag: once Google 5xx's a structured-output call from this
+// egress, later calls in the same server instance (the corrective retry)
+// skip straight to prompt-enforced JSON instead of re-probing and waiting.
+let structuredRejected = false;
+
 async function requestGemini(
   messages: ChatMessage[],
   format: Record<string, unknown>,
@@ -348,9 +353,16 @@ async function requestGemini(
   // it (Google's constrained-decoding capacity rejects datacenter egress),
   // switch to prompt-enforced JSON. The zod + business-rule retry loop in
   // chatStructured validates BOTH paths identically — no canned data ever.
-  let plainMode = false;
+  let plainMode = structuredRejected;
+  // Plain mode must carry the full contract in the prompt — structured mode
+  // used to deliver it via responseSchema, and the system prompt alone only
+  // describes business rules, not field names/types/enums (the model then
+  // guesses and the zod gate fails it). Embedding the zod-derived JSON
+  // Schema closes that gap; validation afterwards is unchanged.
   const PLAIN_RULE =
-    "\n\nOUTPUT FORMAT: Reply with ONLY the raw JSON object that satisfies all rules above. No markdown, no code fences, no commentary before or after.";
+    "\n\nOUTPUT FORMAT: Reply with ONLY one raw JSON object that satisfies all the rules above AND matches this JSON Schema exactly (same field names, types, and enum values):\n" +
+    JSON.stringify(format, null, 2) +
+    "\nNo markdown, no code fences, no commentary before or after.";
   const MAX_CALLS = 3;
 
   let response: Response;
@@ -404,6 +416,7 @@ async function requestGemini(
     if (response.status >= 500 && call < MAX_CALLS) {
       if (!plainMode) {
         plainMode = true;
+        structuredRejected = true;
         console.log(
           `[gemini] upstream ${response.status} in structured mode — switching to prompt-enforced JSON`,
         );
