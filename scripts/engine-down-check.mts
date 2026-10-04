@@ -1,7 +1,11 @@
 /**
  * Verifies the zero-fallback guarantee: when the AI engine is unreachable the
  * client gets a precise 503 AiError — never a silent canned result.
+ *
+ * Forces the Ollama provider so a GEMINI_API_KEY in the environment cannot
+ * divert this check to the cloud.
  */
+process.env.AI_PROVIDER = "ollama";
 process.env.OLLAMA_HOST = "http://127.0.0.1:9"; // deliberately dead port
 
 const { chatStructured, AiError } = await import("../src/lib/ollama");

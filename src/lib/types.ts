@@ -147,6 +147,8 @@ export interface AnalyzeResponse {
   profile: StudentProfile;
   analysis: Analysis;
   model: string;
+  /** Which engine produced this analysis (absent on pre-dual-mode runs). */
+  provider?: "ollama" | "gemini";
   candidateCount: number;
   elapsedMs: number;
 }

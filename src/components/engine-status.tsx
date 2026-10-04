@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 
 type Status =
   | { kind: "checking" }
-  | { kind: "online"; model: string }
+  | { kind: "online"; model: string; provider: "ollama" | "gemini" }
   | { kind: "offline"; message: string };
 
 /**
- * Live badge showing whether the local Ollama engine is actually reachable.
- * Reports real state only — when the engine is down it says so.
+ * Live badge showing whether the active AI engine (local Ollama or Gemini)
+ * is actually reachable. Reports real state only — when it is down it says so.
  */
 export function EngineStatus() {
   const [status, setStatus] = useState<Status>({ kind: "checking" });
@@ -23,12 +23,17 @@ export function EngineStatus() {
         const data = (await res.json()) as {
           ok: boolean;
           model: string;
+          provider?: "ollama" | "gemini";
           error?: string;
           modelPresent?: boolean;
         };
         if (cancelled) return;
         if (data.ok && data.modelPresent !== false) {
-          setStatus({ kind: "online", model: data.model });
+          setStatus({
+            kind: "online",
+            model: data.model,
+            provider: data.provider ?? "ollama",
+          });
         } else {
           setStatus({
             kind: "offline",
@@ -64,7 +69,7 @@ export function EngineStatus() {
     return (
       <span
         className={`${base} border-accent/30 bg-accent/10 text-accent`}
-        title={`Local Ollama · ${status.model}`}
+        title={`${status.provider === "gemini" ? "Gemini API" : "Local Ollama"} · ${status.model}`}
       >
         <span className="size-1.5 rounded-full bg-accent shadow-[0_0_8px_var(--color-accent)]" />
         AI engine online · {status.model}
