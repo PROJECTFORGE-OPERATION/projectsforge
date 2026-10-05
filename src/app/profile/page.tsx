@@ -22,6 +22,13 @@ import {
   saveRun,
   subscribeDraft,
 } from "@/lib/session";
+import {
+  getAuthSnapshot,
+  getServerSnapshot as getAuthServerSnapshot,
+  subscribeAuth,
+} from "@/lib/auth";
+import { Monogram } from "@/components/logo";
+import { AccountChip } from "@/components/account-chip";
 
 type FieldErrors = Partial<
   Record<"branch" | "year" | "interests" | "careerGoal", string>
@@ -53,6 +60,11 @@ const EMPTY_FORM: FormState = {
 export default function ProfilePage() {
   const router = useRouter();
   const draft = useSyncExternalStore(subscribeDraft, getDraftSnapshot, getServerSnapshot);
+  const student = useSyncExternalStore(
+    subscribeAuth,
+    getAuthSnapshot,
+    getAuthServerSnapshot,
+  );
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [skillInput, setSkillInput] = useState("");
@@ -78,6 +90,14 @@ export default function ProfilePage() {
       if (timerRef.current) window.clearInterval(timerRef.current);
     };
   }, [submitting]);
+
+  // Students must be signed in before building a profile.
+  // Reads the store directly instead of `student`: during hydration the hook
+  // still returns the server snapshot (null) when effects fire, which would
+  // falsely redirect even though localStorage has a session.
+  useEffect(() => {
+    if (getAuthSnapshot() === null) router.replace("/login");
+  }, [router]);
 
   function patch<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -160,16 +180,25 @@ export default function ProfilePage() {
 
   const rangePct = ((weeks - 1) / 15) * 100;
 
+  if (!student) {
+    return (
+      <div className="mx-auto w-full max-w-3xl flex-1 px-6 py-24 text-center">
+        <p className="text-sm text-mist">Sign in required — taking you to the login page…</p>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto w-full max-w-3xl flex-1 px-6 pb-16">
       <header className="flex items-center justify-between py-6">
         <Link href="/" className="flex items-center gap-2.5">
-          <span className="grid size-8 place-items-center rounded-lg bg-accent/15 font-mono text-sm font-bold text-accent">
-            PF
-          </span>
+          <Monogram size={30} glow={false} />
           <span className="text-sm font-semibold tracking-wide">ProjectsForge</span>
         </Link>
-        <span className="text-xs text-mist">Step 1 of 2 · Student Profile</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-mist">Step 1 of 2 · Student Profile</span>
+          <AccountChip />
+        </div>
       </header>
 
       <form id="profile-form" onSubmit={handleSubmit} className="mt-4">

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="pf-og-grad" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5fb0ff"/>
+      <stop offset="45%" stop-color="#2e86ff"/>
+      <stop offset="100%" stop-color="#0a46d8"/>
+    </linearGradient>
+    <filter id="pf-og-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <g id="pf-og-glyph">
+      <path d="M14 26 L46 12 L46 104 L14 104 Z"/>
+      <path d="M46 12 H96 V72 L46 92 Z M46 34 H78 V52 L46 74 Z" fill-rule="evenodd"/>
+      <path d="M54 78 L84 78 L102 104 L74 104 Z"/>
+    </g>
+  </defs>
+  <rect width="1200" height="630" fill="#05070c"/>
+  <circle cx="300" cy="315" r="262" fill="#0d1b33" opacity="0.55"/>
+  <g transform="translate(102.4 117.7) scale(3.4)">
+    <use href="#pf-og-glyph" fill="url(#pf-og-grad)" filter="url(#pf-og-glow)"/>
+    <g fill="#05070c">
+      <use href="#pf-og-glyph"/>
+      <path d="M46 34 H78 V52 L46 74 Z"/>
+    </g>
+    <use href="#pf-og-glyph" fill="url(#pf-og-grad)"/>
+  </g>
+  <text x="545" y="300" font-family="Arial Black, Arial, Helvetica, sans-serif"
+        font-size="64" font-weight="900" letter-spacing="1">
+    <tspan fill="#f4f7fb">PROJECT</tspan><tspan fill="#2e86ff" dx="18">FORGE</tspan>
+  </text>
+  <text x="547" y="358" font-family="Arial, Helvetica, sans-serif"
+        font-size="22" font-weight="500" letter-spacing="8" fill="#93a4ba">IDEAS → PROJECTS → CAREERS</text>
+  <text x="547" y="436" font-family="Arial, Helvetica, sans-serif"
+        font-size="26" font-weight="700" fill="#34d399">projectsforge-nu.vercel.app</text>
+</svg>

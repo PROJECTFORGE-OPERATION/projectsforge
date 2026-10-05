@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { EngineStatus } from "@/components/engine-status";
+import { Monogram } from "@/components/logo";
+import { AccountChip } from "@/components/account-chip";
 
 const FLOW = [
   {
@@ -20,7 +22,7 @@ const FLOW = [
   {
     step: "04",
     title: "Roadmap",
-    text: "A practical week-by-week learning and building plan.",
+    text: "Weekly block diagram: learn → build → deliver, with vetted resources.",
   },
 ];
 
@@ -29,16 +31,18 @@ export default function Home() {
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6">
       <header className="flex items-center justify-between py-6">
         <div className="flex items-center gap-2.5">
-          <span className="grid size-8 place-items-center rounded-lg bg-accent/15 font-mono text-sm font-bold text-accent">
-            PF
-          </span>
+          <Monogram size={28} glow={false} />
           <span className="text-sm font-semibold tracking-wide">ProjectsForge</span>
         </div>
-        <EngineStatus />
+        <div className="flex items-center gap-3">
+          <EngineStatus />
+          <AccountChip />
+        </div>
       </header>
 
       <main className="flex flex-1 flex-col justify-center py-10">
         <div className="max-w-3xl">
+          <Monogram size={76} className="mb-6" />
           <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-line bg-panel/70 px-3 py-1.5 text-xs font-medium text-mist">
             <span className="size-1.5 rounded-full bg-accent" />
             Hackathon MVP · one focused student journey
@@ -68,7 +72,8 @@ export default function Home() {
           </div>
 
           <p className="mt-5 text-xs text-mist">
-            Runs on a local LLM via Ollama — your profile never leaves this machine.
+            Real AI, no canned answers — Gemini in production, Ollama locally. Errors
+            surface loudly.
           </p>
         </div>
 
@@ -93,10 +98,6 @@ export default function Home() {
           </div>
         </section>
       </main>
-
-      <footer className="border-t border-line py-5 text-center text-xs text-mist">
-        Build small · Demonstrate clearly · Explain honestly
-      </footer>
     </div>
   );
 }
