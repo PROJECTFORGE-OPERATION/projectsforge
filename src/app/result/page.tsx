@@ -2,15 +2,25 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { Fragment, useEffect, useState, useSyncExternalStore } from "react";
 import {
   clearRun,
   getRunSnapshot,
   getServerSnapshot,
   subscribeRun,
+  type StoredRun,
 } from "@/lib/session";
-import type { Analysis, Recommendation } from "@/lib/types";
+import type { Analysis, Recommendation, RoadmapWeek } from "@/lib/types";
 import { copyReport, downloadReport } from "@/lib/report";
+import { KIND_LABEL, resourcesForWeek } from "@/lib/resources";
+import { buildMailtoUrl, openWhatsApp, whatsappConfigured } from "@/lib/whatsapp";
+import {
+  getAuthSnapshot,
+  getServerSnapshot as getAuthServerSnapshot,
+  subscribeAuth,
+} from "@/lib/auth";
+import { Monogram } from "@/components/logo";
+import { AccountChip } from "@/components/account-chip";
 
 type Tab = "recommendation" | "skillgap" | "roadmap";
 
@@ -54,9 +64,7 @@ export default function ResultPage() {
     <div className="mx-auto w-full max-w-5xl flex-1 px-6 pb-16">
       <header className="flex flex-wrap items-center justify-between gap-3 py-6">
         <Link href="/" className="flex items-center gap-2.5">
-          <span className="grid size-8 place-items-center rounded-lg bg-accent/15 font-mono text-sm font-bold text-accent">
-            PF
-          </span>
+          <Monogram size={30} glow={false} />
           <span className="text-sm font-semibold tracking-wide">ProjectsForge</span>
         </Link>
         <div className="flex flex-wrap items-center gap-2">
@@ -96,6 +104,7 @@ export default function ResultPage() {
           >
             New analysis
           </button>
+          <AccountChip />
         </div>
       </header>
 
@@ -138,6 +147,8 @@ export default function ResultPage() {
       )}
       {tab === "skillgap" && <SkillGapTab analysis={analysis} />}
       {tab === "roadmap" && <RoadmapTab analysis={analysis} />}
+
+      <FeedbackCard run={run} />
 
       {/* Run metadata — transparency for judges */}
       <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4 text-[11px] text-mist">
@@ -335,49 +346,174 @@ function SkillGapTab({ analysis }: { analysis: Analysis }) {
 
 /* ------------------------------------------------------------------------ */
 
+/** Connector between diagram blocks: ↓ on mobile, → on desktop. */
+function BlockArrow() {
+  return (
+    <span
+      className="grid h-5 shrink-0 place-items-center text-mist sm:h-auto sm:w-6"
+      aria-hidden
+    >
+      <span className="sm:hidden">↓</span>
+      <span className="hidden text-lg sm:block">→</span>
+    </span>
+  );
+}
+
+function BlockPanel({
+  label,
+  tint,
+  children,
+}: {
+  label: string;
+  tint: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`flex-1 rounded-xl border bg-panel-2/40 p-3 ${tint}`}>
+      <div className="text-[0.64rem] font-bold uppercase tracking-[0.16em]">
+        {label}
+      </div>
+      <div className="mt-1.5 text-xs leading-relaxed text-chalk/90">{children}</div>
+    </div>
+  );
+}
+
+/** One-click weekly check-in → WhatsApp with a prefilled message (email fallback). */
+function WeekFeedback({ week, project }: { week: RoadmapWeek; project: string }) {
+  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null);
+
+  function send() {
+    const student = getAuthSnapshot();
+    const msg = [
+      "ProjectsForge — weekly check-in",
+      `Project: ${project}`,
+      `Week ${week.week} done: ${week.focus}`,
+      student ? `Student: ${student.name}` : null,
+      "",
+      "How did this week go? Write your experience here:",
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n");
+    if (!openWhatsApp(msg)) {
+      setFallbackUrl(buildMailtoUrl(`Week ${week.week} feedback — ${project}`, msg));
+    }
+  }
+
+  if (fallbackUrl) {
+    return (
+      <a href={fallbackUrl} className="text-xs text-sky hover:underline">
+        WhatsApp number not configured — email it instead →
+      </a>
+    );
+  }
+
+  return (
+    <button type="button" className="chip" onClick={send}>
+      ✓ Week done? Send feedback →
+    </button>
+  );
+}
+
 function RoadmapTab({ analysis }: { analysis: Analysis }) {
+  const projectTitle = analysis.primary.title;
+
   return (
     <section className="mt-5 space-y-6">
+      <p className="text-xs text-mist">
+        Each week is a block flow: what you <span className="text-sky">learn</span>, what
+        you <span className="text-warn">build</span> with it, what you{" "}
+        <span className="text-accent">deliver</span> — plus vetted resources for that
+        week&apos;s topics.
+      </p>
+
       <ol className="relative space-y-4 border-l border-line pl-6">
-        {analysis.roadmap.map((week) => (
-          <li key={week.week} className="relative">
-            <span className="absolute -left-[31px] grid size-6 place-items-center rounded-full border border-accent/50 bg-ink font-mono text-[0.65rem] font-bold text-accent">
-              {week.week}
-            </span>
+        {analysis.roadmap.map((week) => {
+          const resources = resourcesForWeek(week);
+          return (
+            <li key={week.week} className="relative">
+              <span className="absolute -left-[31px] grid size-6 place-items-center rounded-full border border-accent/50 bg-ink font-mono text-[0.65rem] font-bold text-accent">
+                {week.week}
+              </span>
 
-            <div className="card p-4">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h3 className="text-sm font-semibold">
-                  Week {week.week} · {week.focus}
-                </h3>
-              </div>
+              <div className="card p-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h3 className="text-sm font-semibold">
+                    Week {week.week} · {week.focus}
+                  </h3>
+                </div>
 
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {week.learn.map((topic) => (
-                  <span key={topic} className="tag !text-[0.7rem]">
-                    {topic}
+                {/* Weekly block diagram: Learn → Build → Deliver */}
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                  <BlockPanel label="Learn" tint="border-sky/35 text-sky">
+                    {week.learn.length > 0 ? (
+                      <ul className="space-y-1">
+                        {week.learn.map((topic) => (
+                          <li key={topic}>• {topic}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span className="text-mist">
+                        No itemised topics this week — follow the Build block for
+                        the focus: <span className="text-chalk">{week.focus}</span>
+                      </span>
+                    )}
+                  </BlockPanel>
+                  <BlockArrow />
+                  <BlockPanel label="Build" tint="border-warn/40 text-warn">
+                    {week.build}
+                  </BlockPanel>
+                  <BlockArrow />
+                  <BlockPanel label="Deliver" tint="border-accent/45 text-accent">
+                    {week.deliverable}
+                  </BlockPanel>
+                </div>
+
+                {/* Vetted resources for this week's topics */}
+                <div className="mt-3 rounded-xl border border-line bg-panel/60 p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[0.64rem] font-bold uppercase tracking-[0.16em] text-sky">
+                      Resources
+                    </span>
+                    <span className="h-px flex-1 bg-line" />
+                  </div>
+                  <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                    {resources.map((resource) => (
+                      <li key={resource.url}>
+                        <a
+                          href={resource.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-xs text-mist transition hover:text-chalk"
+                        >
+                          <span className="tag shrink-0 !px-1.5 !text-[0.62rem]">
+                            {KIND_LABEL[resource.kind]}
+                          </span>
+                          <span className="truncate underline decoration-line underline-offset-2">
+                            {resource.title}
+                          </span>
+                          <span aria-hidden className="text-[0.7rem]">
+                            ↗
+                          </span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+                  <span className="text-[0.7rem] text-mist">
+                    Finished learning this week&apos;s block?
                   </span>
-                ))}
+                  <WeekFeedback week={week} project={projectTitle} />
+                </div>
               </div>
-
-              <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                <div className="rounded-lg bg-panel-2/40 px-3 py-2">
-                  <dt className="text-[0.68rem] font-semibold uppercase tracking-wide text-mist">
-                    Build
-                  </dt>
-                  <dd className="mt-0.5 text-chalk/90">{week.build}</dd>
-                </div>
-                <div className="rounded-lg bg-panel-2/40 px-3 py-2">
-                  <dt className="text-[0.68rem] font-semibold uppercase tracking-wide text-mist">
-                    Deliverable
-                  </dt>
-                  <dd className="mt-0.5 text-chalk/90">{week.deliverable}</dd>
-                </div>
-              </dl>
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ol>
+
+      {/* Final block diagram — the whole journey after every week */}
+      <FinalFlow analysis={analysis} />
 
       {/* Honest caveats (roadmap doc §11: don't present assumptions as facts) */}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -403,6 +539,206 @@ function RoadmapTab({ analysis }: { analysis: Analysis }) {
             ))}
           </ul>
         </article>
+      </div>
+    </section>
+  );
+}
+
+const PHASE_NAMES = ["Learn foundations", "Build features", "Integrate & demo"];
+const PHASE_TINTS = [
+  "border-sky/35 bg-sky/5 text-sky",
+  "border-warn/40 bg-warn/5 text-warn",
+  "border-line bg-panel-2/40 text-chalk",
+];
+
+/** Whole-roadmap block flow: phases → final deliverable. */
+function FinalFlow({ analysis }: { analysis: Analysis }) {
+  const weeks = analysis.roadmap;
+  if (weeks.length === 0) return null;
+
+  const size = Math.ceil(weeks.length / 3);
+  const phases: RoadmapWeek[][] = [];
+  for (let i = 0; i < weeks.length; i += size) {
+    phases.push(weeks.slice(i, i + size));
+  }
+
+  return (
+    <div className="card p-5">
+      <span className="label">Final block diagram · after every week</span>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+        {phases.map((phase, index) => {
+          const first = phase[0];
+          const last = phase[phase.length - 1];
+          const range =
+            first.week === last.week
+              ? `Week ${first.week}`
+              : `Weeks ${first.week}–${last.week}`;
+          const focusLine =
+            first.week === last.week ? first.focus : `${first.focus} → ${last.focus}`;
+          return (
+            <Fragment key={first.week}>
+              {index > 0 && <BlockArrow />}
+              <div className={`flex-1 rounded-xl border p-3 ${PHASE_TINTS[index] ?? PHASE_TINTS[2]}`}>
+                <div className="text-[0.64rem] font-bold uppercase tracking-[0.16em]">
+                  Phase {index + 1} · {PHASE_NAMES[index] ?? "Extend"}
+                </div>
+                <div className="mt-1.5 text-xs font-semibold text-chalk">{range}</div>
+                <div className="mt-1 text-[0.72rem] leading-relaxed text-mist">
+                  {focusLine}
+                </div>
+              </div>
+            </Fragment>
+          );
+        })}
+        <BlockArrow />
+        <div className="flex-1 rounded-xl border border-accent/45 bg-accent/10 p-3 text-accent">
+          <div className="text-[0.64rem] font-bold uppercase tracking-[0.16em]">
+            Final deliverable
+          </div>
+          <div className="mt-1.5 text-sm font-semibold text-chalk">
+            {analysis.primary.title}
+          </div>
+          <div className="mt-1 text-[0.72rem] leading-relaxed text-mist">
+            Demo-ready project — built, documented, explained honestly.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------ */
+
+/** Post-analysis feedback + suggestions → team WhatsApp (email fallback). */
+function FeedbackCard({ run }: { run: StoredRun }) {
+  const student = useSyncExternalStore(
+    subscribeAuth,
+    getAuthSnapshot,
+    getAuthServerSnapshot,
+  );
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [suggestion, setSuggestion] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const { analysis, profile } = run;
+
+  function message(): string {
+    const lines = [
+      "ProjectsForge feedback",
+      `Project: ${analysis.primary.title} (${analysis.primary.matchScore}% match)`,
+      `Student: ${student ? `${student.name} · ` : ""}${profile.branch}, ${profile.year}`,
+      `Rating: ${rating}/5`,
+    ];
+    if (comment.trim()) lines.push(`Comment: ${comment.trim()}`);
+    if (suggestion.trim()) lines.push(`Suggestion: ${suggestion.trim()}`);
+    lines.push("— sent from the result page");
+    return lines.join("\n");
+  }
+
+  function validate(): boolean {
+    if (rating < 1) {
+      setError("Tap a star first — we need a rating.");
+      return false;
+    }
+    setError(null);
+    return true;
+  }
+
+  function sendWhatsApp() {
+    if (!validate()) return;
+    if (!openWhatsApp(message())) {
+      setError("WhatsApp number isn't configured on this deployment yet — use “Email instead”.");
+    }
+  }
+
+  function sendEmail() {
+    if (!validate()) return;
+    window.location.href = buildMailtoUrl(
+      `Feedback — ${analysis.primary.title}`,
+      message(),
+    );
+  }
+
+  return (
+    <section className="card mt-8 p-5" aria-labelledby="feedback-heading">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="feedback-heading" className="text-base font-semibold">
+            How useful was this analysis?
+          </h2>
+          <p className="mt-1 text-xs text-mist">
+            Rate it and tell us what to improve — feedback goes straight to our
+            team&apos;s phone.
+          </p>
+        </div>
+        <div className="flex items-center gap-1" role="group" aria-label="Rating out of 5">
+          {[1, 2, 3, 4, 5].map((star) => (
+            <button
+              key={star}
+              type="button"
+              onClick={() => {
+                setRating(star);
+                setError(null);
+              }}
+              aria-label={`${star} star${star > 1 ? "s" : ""}`}
+              className={`text-2xl leading-none transition ${
+                star <= rating ? "text-warn" : "text-line hover:text-warn/60"
+              }`}
+            >
+              ★
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <label className="block">
+          <span className="label">What worked / what confused you</span>
+          <textarea
+            className="field min-h-24 resize-y"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="The skill-gap section was spot on… (optional)"
+          />
+        </label>
+        <label className="block">
+          <span className="label">Suggest a feature or improvement</span>
+          <textarea
+            className="field min-h-24 resize-y"
+            value={suggestion}
+            onChange={(e) => setSuggestion(e.target.value)}
+            placeholder="Add a mock-interview section later… (optional)"
+          />
+        </label>
+      </div>
+
+      {error && (
+        <p
+          role="alert"
+          className="mt-3 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
+          {error}
+        </p>
+      )}
+
+      {!whatsappConfigured && (
+        <p className="mt-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
+          Heads up: the WhatsApp number isn&apos;t configured on this deployment
+          yet — email delivery works right now.
+        </p>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button type="button" className="btn btn-accent" onClick={sendWhatsApp}>
+          Send feedback on WhatsApp
+        </button>
+        <button type="button" className="btn btn-ghost" onClick={sendEmail}>
+          Email instead
+        </button>
+        <span className="ml-auto text-xs text-mist">
+          projectforgestartup@gmail.com
+        </span>
       </div>
     </section>
   );

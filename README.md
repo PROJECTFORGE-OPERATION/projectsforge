@@ -1,10 +1,23 @@
+<p align="center">
+  <img src="public/logo-full.svg" width="420" alt="ProjectsForge — Ideas to Projects to Careers" />
+</p>
+
 # ProjectsForge — Hackathon MVP
 
 > From project ideas to career-ready skills.
 
 **🟢 Live demo: https://projectsforge-nu.vercel.app** (Gemini cloud mode) — locally the same app runs on Ollama with no API key (see Configuration).
 
-A focused hackathon prototype: **student profile → personalized project recommendation → skill gap → week-by-week roadmap**. One strong working journey, powered by a real local LLM — no canned demo data, no fallback mode.
+A focused hackathon prototype: **student login → profile → personalized project recommendation → skill gap → weekly block-diagram roadmap with vetted resources → feedback straight to the team's WhatsApp**. One strong working journey, powered by real AI — no canned demo data, no fallback mode.
+
+**What's in this build**
+
+- 🎓 **Student login** — device-local accounts (email + password, stored in the browser; honest demo-grade auth, no server DB).
+- 🧠 **Real AI analysis** — recommendation, skill gap and roadmap from Gemini (prod) or Ollama (local); loud 502/503/504 on failure.
+- 🧱 **Weekly block diagrams** — every week renders as a `Learn → Build → Deliver` block flow, and after all weeks a **final block diagram** shows the whole journey into the final deliverable.
+- 📚 **Vetted resources in every roadmap week** — hand-picked official docs/courses matched to that week's topics (search fallbacks that are valid by construction — no AI-hallucinated links).
+- 💬 **WhatsApp feedback** — rate + comment + suggestions on the result page (and a one-click check-in under each week) open a prefilled WhatsApp message to the team; email fallback always available.
+- 📧 **Footer contact** — `projectforgestartup@gmail.com` on every page, plus suggestions welcome.
 
 ## Stack
 
@@ -39,6 +52,7 @@ Open http://localhost:3000 — the header badge shows the **real** engine status
 | `GEMINI_API_KEY`    | *(unset)*                 | **Enables cloud mode** — Gemini replaces Ollama |
 | `GEMINI_MODEL`      | `gemini-3.8-flash`        | Gemini model name                             |
 | `AI_PROVIDER`       | *(auto)*                  | Force `ollama` or `gemini` regardless of key  |
+| `NEXT_PUBLIC_WHATSAPP_NUMBER` | *(unset)*      | Team WhatsApp number (digits, country code) for feedback delivery — until set, feedback falls back to email with a visible warning |
 
 **Provider resolution:** `AI_PROVIDER` wins → else `GEMINI_API_KEY` set means
 Gemini → else local Ollama. Same contract both ways: zod + business-rule retry,
@@ -115,13 +129,17 @@ profile ──► deterministic candidate ranking (top 8 of 16 records)
 
 ## Demo script (per the roadmap)
 
-1. **Landing** → value proposition + live engine badge.
-2. **Profile** → enter a 1st-year CSE-IoT student, 2–3 skills, 4 weeks.
-3. **Recommendation** → primary project + match score + *why this project* + 2–3 alternatives.
-4. **Skill Gap** → existing skills (echoed from the form) vs. skills to learn with priorities.
-5. **Roadmap** → exactly N weeks of learn/build/deliverable, plus honest risks & assumptions.
+1. **Landing** → logo, value proposition + live engine badge.
+2. **Login** → create a student account (email + password, saved on the device).
+3. **Profile** → enter a 1st-year CSE-IoT student, 2–3 skills, 4 weeks.
+4. **Recommendation** → primary project + match score + *why this project* + 2–3 alternatives.
+5. **Skill Gap** → existing skills (echoed from the form) vs. skills to learn with priorities.
+6. **Roadmap** → weekly **block diagram** (`Learn → Build → Deliver`) with vetted resources per week, then the **final block diagram** (phases → final deliverable), plus honest risks & assumptions.
+7. **Feedback** → star rating + comments + suggestions → prefilled WhatsApp message to the team (email fallback). Each week also has a one-click "week done" check-in.
 
 **Personalization proof:** change one field (e.g. 4 → 12 weeks, or add "Arduino") and re-run — the recommendation, skill gap and roadmap visibly change.
+
+**Branding:** the PROJECT FORGE mark is recreated as pure SVG (`src/components/logo.tsx` for the app, `public/logo-full.svg` for the README, `src/app/icon.svg` as favicon, `scripts/og.svg` → `opengraph-image.png` for link previews; regenerate PNGs with `node scripts/make-icons.mjs`).
 
 ## Team split
 
