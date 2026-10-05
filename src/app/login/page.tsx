@@ -10,7 +10,7 @@ import {
   signUp,
   subscribeAuth,
 } from "@/lib/auth";
-import { Monogram } from "@/components/logo";
+import { LogoLockup } from "@/components/logo";
 
 type Mode = "signin" | "signup";
 
@@ -44,7 +44,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="card p-8">
           <div className="flex flex-col items-center text-center">
-            <Monogram size={64} />
+            <LogoLockup width={230} />
             <h1 className="mt-5 text-2xl font-semibold tracking-tight">
               {mode === "signin" ? "Welcome back" : "Create your student account"}
             </h1>

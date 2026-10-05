@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/logo-full.svg" width="420" alt="ProjectsForge — Ideas to Projects to Careers" />
+  <img src="public/logo.png" width="420" alt="ProjectsForge — Ideas to Projects to Careers" />
 </p>
 
 # ProjectsForge — Hackathon MVP
@@ -139,7 +139,7 @@ profile ──► deterministic candidate ranking (top 8 of 16 records)
 
 **Personalization proof:** change one field (e.g. 4 → 12 weeks, or add "Arduino") and re-run — the recommendation, skill gap and roadmap visibly change.
 
-**Branding:** the PROJECT FORGE mark is recreated as pure SVG (`src/components/logo.tsx` for the app, `public/logo-full.svg` for the README, `src/app/icon.svg` as favicon, `scripts/og.svg` → `opengraph-image.png` for link previews; regenerate PNGs with `node scripts/make-icons.mjs`).
+**Branding:** the original PROJECT FORGE logo (`scripts/logo-source.png`) feeds the whole brand pipeline — `public/logo.png` (full lockup, README + hero + login), `public/logo-mark.png` (square mark for headers/footer), `src/app/icon.png` + `apple-icon.png` (browser/home-screen icons), `src/app/opengraph-image.png` (link previews); regenerate all with `node scripts/make-brand.mjs`.
 
 ## Team split
 
