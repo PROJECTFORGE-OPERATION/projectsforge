@@ -70,7 +70,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     console.error("[api/analyze] unexpected error:", cause);
     return errorResponse(500, {
-      error: "Unexpected server error — see the dev server logs.",
+      error: "Unexpected server error — please try again. If it keeps failing, the server logs need review.",
     });
   }
 }

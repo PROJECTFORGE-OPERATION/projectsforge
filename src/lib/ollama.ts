@@ -20,6 +20,13 @@ export const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "phi4-gpu";
 export const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.8-flash";
 const GEMINI_KEY = process.env.GEMINI_API_KEY?.trim() || undefined;
 const TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS ?? 180_000);
+/**
+ * Gemini runs inside a Vercel function capped at `maxDuration = 60s`. Wait at
+ * most 50s per call so OUR loud 504 lands before the platform kills the
+ * invocation and answers with a bare HTML error the UI can't parse. Ollama is
+ * local and keeps the generous TIMEOUT_MS (OLLAMA_TIMEOUT_MS).
+ */
+const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS ?? 50_000);
 const ATTEMPTS = 2;
 
 export type Provider = "ollama" | "gemini";
@@ -390,7 +397,7 @@ async function requestGemini(
                 }),
           },
         }),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
       });
     } catch (cause) {
       const timedOut =
@@ -398,7 +405,7 @@ async function requestGemini(
         (cause.name === "TimeoutError" || cause.name === "AbortError");
       if (timedOut) {
         throw new AiError(
-          `Gemini did not respond within ${Math.round(TIMEOUT_MS / 1000)}s.`,
+          `Gemini did not respond within ${Math.round(GEMINI_TIMEOUT_MS / 1000)}s.`,
           504,
         );
       }
