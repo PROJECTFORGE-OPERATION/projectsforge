@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { EngineStatus } from "@/components/engine-status";
-import { Monogram } from "@/components/logo";
+import { LogoLockup, Monogram } from "@/components/logo";
 import { AccountChip } from "@/components/account-chip";
 
 const FLOW = [
@@ -42,7 +42,7 @@ export default function Home() {
 
       <main className="flex flex-1 flex-col justify-center py-10">
         <div className="max-w-3xl">
-          <Monogram size={76} className="mb-6" />
+          <LogoLockup width={300} className="mb-6" />
           <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-line bg-panel/70 px-3 py-1.5 text-xs font-medium text-mist">
             <span className="size-1.5 rounded-full bg-accent" />
             Hackathon MVP · one focused student journey
