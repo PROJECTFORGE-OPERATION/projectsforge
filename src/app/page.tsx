@@ -2,6 +2,7 @@ import Link from "next/link";
 import { EngineStatus } from "@/components/engine-status";
 import { LogoLockup, Monogram } from "@/components/logo";
 import { AccountChip } from "@/components/account-chip";
+import { HeroVisual } from "@/components/hero-visual";
 
 const FLOW = [
   {
@@ -41,40 +42,48 @@ export default function Home() {
       </header>
 
       <main className="flex flex-1 flex-col justify-center py-10">
-        <div className="max-w-3xl">
-          <LogoLockup width={300} className="mb-6" />
-          <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-line bg-panel/70 px-3 py-1.5 text-xs font-medium text-mist">
-            <span className="size-1.5 rounded-full bg-accent" />
-            Hackathon MVP · one focused student journey
-          </span>
-
-          <h1 className="text-4xl font-bold leading-[1.08] tracking-tight sm:text-6xl">
-            From project ideas to{" "}
-            <span className="bg-gradient-to-r from-accent to-sky bg-clip-text text-transparent">
-              career-ready skills
+        <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)]">
+          <div className="max-w-3xl">
+            <LogoLockup width={300} className="mb-6" />
+            <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-line bg-panel/70 px-3 py-1.5 text-xs font-medium text-mist">
+              <span className="size-1.5 rounded-full bg-accent" />
+              Hackathon MVP · one focused student journey
             </span>
-          </h1>
 
-          <p className="mt-6 max-w-2xl text-base leading-relaxed text-mist sm:text-lg">
-            ProjectsForge helps an engineering student choose a project that fits
-            their branch, year, skills, interests, career goal and available time —
-            then produces a skill-gap analysis and a practical project roadmap.
-          </p>
+            <h1 className="text-4xl font-bold leading-[1.08] tracking-tight sm:text-6xl">
+              From project ideas to{" "}
+              <span className="bg-gradient-to-r from-accent to-sky bg-clip-text text-transparent">
+                career-ready skills
+              </span>
+            </h1>
 
-          <div className="mt-9 flex flex-wrap items-center gap-4">
-            <Link href="/profile" className="btn btn-accent">
-              Get Started
-              <span aria-hidden>→</span>
-            </Link>
-            <a href="#flow" className="btn btn-ghost">
-              See the flow
-            </a>
+            <p className="mt-6 max-w-2xl text-base leading-relaxed text-mist sm:text-lg">
+              ProjectsForge helps an engineering student choose a project that fits
+              their branch, year, skills, interests, career goal and available time —
+              then produces a skill-gap analysis and a practical project roadmap.
+            </p>
+
+            <div className="mt-9 flex flex-wrap items-center gap-4">
+              <Link href="/profile" className="btn btn-accent">
+                Get Started
+                <span aria-hidden>→</span>
+              </Link>
+              <a href="#flow" className="btn btn-ghost">
+                See the flow
+              </a>
+            </div>
+
+            <p className="mt-5 text-xs text-mist">
+              Real AI, no canned answers — Gemini in production, Ollama locally. Errors
+              surface loudly.
+            </p>
+            <p className="mt-2 text-xs text-mist">
+              Founder <span className="font-medium text-chalk">Sundar</span> · Developer{" "}
+              <span className="font-medium text-chalk">Hanmanth</span>
+            </p>
           </div>
 
-          <p className="mt-5 text-xs text-mist">
-            Real AI, no canned answers — Gemini in production, Ollama locally. Errors
-            surface loudly.
-          </p>
+          <HeroVisual className="hidden lg:block" />
         </div>
 
         <section id="flow" className="mt-16">
