@@ -44,7 +44,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         {children}
 
         <footer className="border-t border-line bg-panel/40">
-          <div className="mx-auto grid w-full max-w-6xl gap-8 px-6 py-10 sm:grid-cols-3">
+          <div className="mx-auto grid w-full max-w-6xl gap-8 px-6 py-10 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <div className="flex items-center gap-2.5">
                 <Monogram size={26} glow={false} />
@@ -95,6 +95,20 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                   >
                     Build a roadmap
                   </Link>
+                </li>
+              </ul>
+            </div>
+
+            <div>
+              <span className="label">Team</span>
+              <ul className="space-y-2 text-sm">
+                <li>
+                  <span className="text-chalk">Sundar</span>
+                  <span className="text-xs text-mist"> · Founder</span>
+                </li>
+                <li>
+                  <span className="text-chalk">Hanmanth</span>
+                  <span className="text-xs text-mist"> · Developer</span>
                 </li>
               </ul>
             </div>
