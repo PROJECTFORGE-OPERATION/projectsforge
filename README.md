@@ -13,6 +13,7 @@ A focused hackathon prototype: **student login → profile → personalized proj
 **What's in this build**
 
 - 🎓 **Student login** — device-local accounts (email + password, stored in the browser; honest demo-grade auth, no server DB).
+- 🔑 **Forgot password** — a real 6-digit OTP emailed to the registered address (5-minute expiry, attempt limit, resend cooldown); stateless HMAC verification, no server DB, and an explicit loud 503 when SMTP isn't configured instead of a fake code.
 - 🧠 **Real AI analysis** — recommendation, skill gap and roadmap from Gemini (prod) or Ollama (local); loud 502/503/504 on failure.
 - 🧱 **Weekly block diagrams** — every week renders as a `Learn → Build → Deliver` block flow, and after all weeks a **final block diagram** shows the whole journey into the final deliverable.
 - 📚 **Vetted resources in every roadmap week** — hand-picked official docs/courses matched to that week's topics (search fallbacks that are valid by construction — no AI-hallucinated links).
