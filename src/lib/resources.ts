@@ -25,12 +25,20 @@ export const KIND_LABEL: Record<ResourceKind, string> = {
   practice: "Practice",
 };
 
-function youtube(query: string): Resource {
+export function youtube(query: string): Resource {
   return {
     title: `YouTube: ${query}`,
     url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
     kind: "video",
   };
+}
+
+/**
+ * Direct YouTube link. IDs are verified via the oEmbed endpoint at curation
+ * time — an invalid id returns 404 there, so these cannot be hallucinated.
+ */
+export function directVideo(id: string, title: string): Resource {
+  return { title, url: `https://www.youtube.com/watch?v=${id}`, kind: "video" };
 }
 
 function webSearch(query: string): Resource {
@@ -52,6 +60,7 @@ const RULES: Rule[] = [
     items: [
       { title: "Python official tutorial", url: "https://docs.python.org/3/tutorial/", kind: "docs" },
       { title: "freeCodeCamp — Python", url: "https://www.freecodecamp.org/learn/scientific-computing-with-python/", kind: "course" },
+      directVideo("eWRfhZUzrAc", "Python for Beginners — full course (freeCodeCamp)"),
     ],
   },
   {
@@ -59,6 +68,7 @@ const RULES: Rule[] = [
     items: [
       { title: "JavaScript.info — modern tutorial", url: "https://javascript.info/", kind: "docs" },
       { title: "MDN — JavaScript guide", url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide", kind: "docs" },
+      directVideo("PkZNo7MFNFg", "Learn JavaScript — full course for beginners (freeCodeCamp)"),
     ],
   },
   {
@@ -73,6 +83,7 @@ const RULES: Rule[] = [
     items: [
       { title: "React — Learn", url: "https://react.dev/learn", kind: "docs" },
       { title: "roadmap.sh — React", url: "https://roadmap.sh/react", kind: "course" },
+      directVideo("DLX62G4lc44", "Learn React JS — full course for beginners (freeCodeCamp)"),
     ],
   },
   {
@@ -100,7 +111,7 @@ const RULES: Rule[] = [
     test: /tailwind/i,
     items: [
       { title: "Tailwind CSS docs", url: "https://tailwindcss.com/docs", kind: "docs" },
-      youtube("tailwind css full tutorial"),
+      directVideo("lCxcTsOHrjo", "Tailwind CSS full course (Dave Gray)"),
     ],
   },
   {
@@ -136,6 +147,7 @@ const RULES: Rule[] = [
     items: [
       { title: "Pro Git book", url: "https://git-scm.com/book/en/v2", kind: "docs" },
       { title: "GitHub — Get started", url: "https://docs.github.com/en/get-started", kind: "docs" },
+      directVideo("mAFoROnOfHs", "Git & GitHub crash course for beginners (freeCodeCamp)"),
     ],
   },
   {
@@ -306,5 +318,14 @@ export function resourcesForWeek(week: RoadmapWeek): Resource[] {
     push(webSearch(seed));
   }
 
-  return out.slice(0, 5);
+  // Videos are supported everywhere: direct curated links exist for major
+  // topics, and any week whose matched docs lack one still gets a YouTube
+  // search for its focus (valid by construction) in the reserved slot.
+  const top = out.slice(0, 5);
+  if (!top.some((resource) => resource.kind === "video")) {
+    if (top.length >= 5) top.pop();
+    top.push(youtube(`${week.focus} tutorial`));
+  }
+
+  return top;
 }

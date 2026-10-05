@@ -96,6 +96,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                     Build a roadmap
                   </Link>
                 </li>
+                <li>
+                  <Link
+                    href="/communication"
+                    className="text-mist transition hover:text-chalk"
+                  >
+                    Communication Skills
+                  </Link>
+                </li>
               </ul>
             </div>
 

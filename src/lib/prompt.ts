@@ -1,5 +1,5 @@
 import type { ProjectRecord } from "./projects";
-import type { Analysis, StudentProfile } from "./types";
+import type { Analysis, Introduction, StudentProfile } from "./types";
 import type { ChatMessage } from "./ollama";
 
 export function buildMessages(
@@ -69,6 +69,64 @@ export function makeValidator(
     }
     if (value.skillGap.needToLearn.length < 1) {
       return "skillGap.needToLearn must contain at least one skill";
+    }
+    return null;
+  };
+}
+
+/**
+ * Self-introduction generator (POST /api/intro): the student's profile turned
+ * into a first-person introduction they can read aloud in an interview.
+ */
+export function buildIntroMessages(
+  name: string,
+  profile: StudentProfile,
+): ChatMessage[] {
+  const system = `You are ProjectsForge, writing a self-introduction for an engineering student heading into placement interviews.
+
+The student will read your text aloud, so it must sound like natural spoken English.
+
+STRICT RULES
+1. Write in FIRST PERSON, as the student: "I am…", "I have…", "I enjoy…".
+2. Sentence 1 introduces the student BY NAME, exactly as given.
+3. Use ONLY the facts in the profile. Never invent colleges, grades, awards, internships or certifications.
+4. 90-140 words, one flowing paragraph. Warm, confident, concrete.
+5. Structure: name, branch and year -> background (college/schooling when given) -> skills and interests -> career goal -> hobbies -> one-line close.
+6. Plain text only: no markdown, no headings, no quotes around the text, no blank lines.
+
+Return ONLY a JSON object: {"introduction": "..."} — the field name is exactly "introduction".`;
+
+  const user = `STUDENT
+Name: ${name}
+${JSON.stringify(profile, null, 2)}
+
+Write the self-introduction now.`;
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ];
+}
+
+/**
+ * Grounding rules for the introduction: it must name the student and stay in
+ * first person — anything else triggers the corrective retry, and two failed
+ * attempts fail the request loudly (no canned intro exists).
+ */
+export function makeIntroValidator(
+  name: string,
+): (value: Introduction) => string | null {
+  const first = name.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  return (value: Introduction): string | null => {
+    const text = value.introduction;
+    if (first && !text.toLowerCase().includes(first)) {
+      return "the first sentence must mention the student's name";
+    }
+    if (!/\bI\b/.test(text)) {
+      return "it must be written in first person (sentences start with I)";
+    }
+    if (/\n\s*\n/.test(text)) {
+      return "it must be a single paragraph with no blank lines";
     }
     return null;
   };

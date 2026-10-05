@@ -12,7 +12,7 @@ import {
 } from "@/lib/session";
 import type { Analysis, Recommendation, RoadmapWeek } from "@/lib/types";
 import { copyReport, downloadReport } from "@/lib/report";
-import { KIND_LABEL, resourcesForWeek } from "@/lib/resources";
+import { resourcesForWeek } from "@/lib/resources";
 import { buildMailtoUrl, openWhatsApp, whatsappConfigured } from "@/lib/whatsapp";
 import {
   getAuthSnapshot,
@@ -21,13 +21,22 @@ import {
 } from "@/lib/auth";
 import { Monogram } from "@/components/logo";
 import { AccountChip } from "@/components/account-chip";
+import { ResourceLink } from "@/components/resource-link";
+import { SelfIntroCard } from "@/components/self-intro";
+import {
+  addCompletion,
+  getCompletedServerSnapshot,
+  getCompletedSnapshot,
+  subscribeCompleted,
+} from "@/lib/records";
 
-type Tab = "recommendation" | "skillgap" | "roadmap";
+type Tab = "recommendation" | "skillgap" | "roadmap" | "intro";
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "recommendation", label: "Recommendation" },
   { id: "skillgap", label: "Skill Gap" },
   { id: "roadmap", label: "Roadmap" },
+  { id: "intro", label: "Self-intro" },
 ];
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -147,6 +156,7 @@ export default function ResultPage() {
       )}
       {tab === "skillgap" && <SkillGapTab analysis={analysis} />}
       {tab === "roadmap" && <RoadmapTab analysis={analysis} />}
+      {tab === "intro" && <SelfIntroCard profile={profile} />}
 
       <FeedbackCard run={run} />
 
@@ -479,22 +489,7 @@ function RoadmapTab({ analysis }: { analysis: Analysis }) {
                   <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
                     {resources.map((resource) => (
                       <li key={resource.url}>
-                        <a
-                          href={resource.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 text-xs text-mist transition hover:text-chalk"
-                        >
-                          <span className="tag shrink-0 !px-1.5 !text-[0.62rem]">
-                            {KIND_LABEL[resource.kind]}
-                          </span>
-                          <span className="truncate underline decoration-line underline-offset-2">
-                            {resource.title}
-                          </span>
-                          <span aria-hidden className="text-[0.7rem]">
-                            ↗
-                          </span>
-                        </a>
+                        <ResourceLink resource={resource} />
                       </li>
                     ))}
                   </ul>
@@ -514,6 +509,9 @@ function RoadmapTab({ analysis }: { analysis: Analysis }) {
 
       {/* Final block diagram — the whole journey after every week */}
       <FinalFlow analysis={analysis} />
+
+      {/* Completion record → unlocks the Communication Skills section */}
+      <MarkComplete analysis={analysis} />
 
       {/* Honest caveats (roadmap doc §11: don't present assumptions as facts) */}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -603,6 +601,66 @@ function FinalFlow({ analysis }: { analysis: Analysis }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Completion record: marks the primary project done, snapshots an
+ * interview-ready record (stack, weeks, skills covered) and links into the
+ * Communication Skills section this unlocks.
+ */
+function MarkComplete({ analysis }: { analysis: Analysis }) {
+  const completed = useSyncExternalStore(
+    subscribeCompleted,
+    getCompletedSnapshot,
+    getCompletedServerSnapshot,
+  );
+  const record = completed.find((entry) => entry.id === analysis.primary.id);
+
+  if (record) {
+    return (
+      <div className="card border-accent/40 bg-accent/5 p-5">
+        <span className="label">Project recorded</span>
+        <p className="mt-1 text-sm leading-relaxed text-chalk/90">
+          ✓ Marked complete
+          {record.completedAt
+            ? ` on ${new Date(record.completedAt).toLocaleDateString()}`
+            : ""}
+          . Your Communication Skills section is unlocked and this project is
+          saved as your interview record.
+        </p>
+        <Link href="/communication" className="btn btn-accent mt-4">
+          Open Communication Skills <span aria-hidden>→</span>
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card p-5">
+      <span className="label">Finished building the project?</span>
+      <p className="mt-1 text-sm leading-relaxed text-mist">
+        Mark it complete to record what you built — stack, weeks and skills
+        covered — and unlock the Communication Skills section for interview
+        prep.
+      </p>
+      <button
+        type="button"
+        className="btn btn-accent mt-4"
+        onClick={() =>
+          addCompletion({
+            id: analysis.primary.id,
+            title: analysis.primary.title,
+            technologies: analysis.primary.technologies,
+            skillsCovered: analysis.skillGap.needToLearn.map((item) => item.skill),
+            weeks: analysis.roadmap.length,
+            completedAt: new Date().toISOString(),
+          })
+        }
+      >
+        Mark project complete
+      </button>
     </div>
   );
 }
