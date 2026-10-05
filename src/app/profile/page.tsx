@@ -23,7 +23,9 @@ import {
   subscribeDraft,
 } from "@/lib/session";
 import {
+  authResolved,
   getAuthSnapshot,
+  getServerResolvedSnapshot,
   getServerSnapshot as getAuthServerSnapshot,
   subscribeAuth,
 } from "@/lib/auth";
@@ -95,12 +97,21 @@ export default function ProfilePage() {
   // to login if they sign out while on this page.
   // Reads the store directly instead of trusting `student`: during hydration
   // the hook still returns the server snapshot (null) when effects fire, which
-  // would falsely redirect even though localStorage has a session. Requiring
-  // BOTH the store and the hook to be null keeps hydration safe while still
-  // catching a real sign-out (they flip to null together).
+  // would falsely redirect even though Firebase still has a session. Requiring
+  // BOTH the store and the hook to be null keeps hydration safe — while
+  // `authReady` (a subscription of its own) re-runs this effect the moment
+  // Firebase resolves its first state. Without it the first run could see
+  // "not resolved yet" and never fire again, because flipping resolved with a
+  // null store doesn't change the student snapshot.
+  const authReady = useSyncExternalStore(
+    subscribeAuth,
+    authResolved,
+    getServerResolvedSnapshot,
+  );
   useEffect(() => {
-    if (getAuthSnapshot() === null && student === null) router.replace("/login");
-  }, [student, router]);
+    if (authReady && getAuthSnapshot() === null && student === null)
+      router.replace("/login");
+  }, [authReady, student, router]);
 
   function patch<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));

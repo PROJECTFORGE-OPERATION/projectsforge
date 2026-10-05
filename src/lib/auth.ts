@@ -1,17 +1,34 @@
 /**
- * Device-local student accounts (hackathon-grade auth, honestly labelled).
+ * Firebase Authentication — cloud student accounts (Email + Password).
  *
- * Accounts live in localStorage on the student's own device — there is no
- * server database and no claim of real security. Passwords are stored as a
- * salted non-cryptographic hash so they are not sitting in plain text, but
- * this exists to give the demo a real login flow, not to be production auth.
+ * Accounts live in Firebase, so students sign in from any device and
+ * password-reset emails are sent by Google to any address (150/day on the
+ * free Spark plan, no SMTP credentials of our own). There is no database of
+ * ours and no fallback mode: if Firebase is unconfigured or unreachable,
+ * every call fails loudly with the provider's error mapped to plain copy.
+ *
+ * Local development can set NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL (e.g.
+ * http://localhost:9099) — the SDK then keeps everything on the Firebase
+ * Auth emulator, which stores reset links instead of sending email.
  *
  * Exposed as an external store (subscribe + snapshot) like session.ts so
  * pages can read the signed-in student with useSyncExternalStore — SSR-safe.
  */
 
-const STUDENTS_KEY = "projectsforge:students:v1";
-const SESSION_KEY = "projectsforge:session:v1";
+import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
+import {
+  connectAuthEmulator,
+  confirmPasswordReset,
+  createUserWithEmailAndPassword,
+  getAuth,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  updateProfile,
+  type Auth,
+  type User,
+} from "firebase/auth";
 
 export interface Student {
   name: string;
@@ -19,24 +36,116 @@ export interface Student {
   joinedAt: string;
 }
 
-interface StoredAccount {
-  name: string;
-  hash: string;
-  joinedAt: string;
+export interface AuthResult {
+  ok: boolean;
+  error?: string;
 }
 
-type Accounts = Record<string, StoredAccount>;
 type Listener = () => void;
 
 const listeners = new Set<Listener>();
-let cache: Student | null | undefined; // undefined = not read yet
+let cache: Student | null = null;
+let resolved = false;
+let authInstance: Auth | null = null;
+
+const firebaseConfig = {
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+};
+
+const EMULATOR_URL =
+  process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL?.trim() || null;
+
+const NOT_CONFIGURED =
+  "Firebase Authentication isn't configured on this build — set the NEXT_PUBLIC_FIREBASE_* values and redeploy.";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function emit(): void {
   for (const listener of listeners) listener();
 }
 
+function toStudent(user: User): Student {
+  const email = (user.email ?? "").toLowerCase();
+  return {
+    name: user.displayName?.trim() || email.split("@")[0] || "Student",
+    email,
+    joinedAt: user.metadata.creationTime || new Date().toISOString(),
+  };
+}
+
+function configured(): boolean {
+  return Boolean(
+    firebaseConfig.apiKey &&
+      firebaseConfig.authDomain &&
+      firebaseConfig.projectId &&
+      firebaseConfig.appId,
+  );
+}
+
+/** Lazily create the client Auth instance (browser only) + state listener. */
+function auth(): Auth | null {
+  if (typeof window === "undefined" || !configured()) return null;
+  if (!authInstance) {
+    const app: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
+    const instance = getAuth(app);
+    if (EMULATOR_URL) {
+      connectAuthEmulator(instance, EMULATOR_URL, { disableWarnings: true });
+    }
+    onAuthStateChanged(instance, (user) => {
+      cache = user ? toStudent(user) : null;
+      resolved = true;
+      emit();
+    });
+    authInstance = instance;
+  }
+  return authInstance;
+}
+
+/** Provider error codes → plain, loud copy. Never silent. */
+function authError(cause: unknown): string {
+  const err = cause as { code?: string; message?: string } | null;
+  const code = err?.code ?? "";
+  const message = err?.message ?? String(cause ?? "");
+  switch (code) {
+    case "auth/email-already-in-use":
+      return "An account already exists for that email — sign in instead.";
+    case "auth/invalid-email":
+      return "That email doesn't look right.";
+    case "auth/invalid-credential":
+    case "auth/wrong-password":
+    case "auth/invalid-login-credentials":
+      return "Wrong email or password. Try again.";
+    case "auth/user-not-found":
+      return "No account found for that email — create one first.";
+    case "auth/missing-password":
+      return "Enter your password.";
+    case "auth/weak-password":
+      return "Password needs at least 6 characters.";
+    case "auth/network-request-failed":
+      return "Could not reach Firebase — check your connection and try again.";
+    case "auth/too-many-requests":
+      return "Too many attempts — wait a minute and try again.";
+    case "auth/expired-action-code":
+      return "That reset link has expired — request a new one.";
+    case "auth/invalid-action-code":
+      return "That reset link is invalid or was already used — request a new one.";
+    case "auth/user-disabled":
+      return "That account has been disabled.";
+    case "auth/operation-not-allowed":
+      return "Email/Password sign-in isn't enabled in the Firebase console.";
+    default:
+      return `Firebase Authentication failed${code ? ` (${code})` : ""} — ${message || "unknown error"}.`;
+  }
+}
+
 export function subscribeAuth(listener: Listener): () => void {
   listeners.add(listener);
+  auth(); // first subscriber starts the Firebase state listener
   return () => {
     listeners.delete(listener);
   };
@@ -46,86 +155,30 @@ export function getServerSnapshot(): null {
   return null;
 }
 
+/** Server snapshot for the resolved flag — auth state is unknown during SSR. */
+export function getServerResolvedSnapshot(): false {
+  return false;
+}
+
 export function getAuthSnapshot(): Student | null {
   if (typeof window === "undefined") return null;
-  if (cache !== undefined) return cache;
-  cache = readSession();
   return cache;
 }
 
-/** Demo-grade password digest: salted FNV-1a. Not cryptographic — device-local only. */
-function digest(password: string): string {
-  const salted = `projectsforge:${password}`;
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < salted.length; i++) {
-    hash ^= salted.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  // Second pass with reversed input to widen the avalanche a little.
-  for (let i = salted.length - 1; i >= 0; i--) {
-    hash ^= salted.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0");
+/**
+ * True once Firebase has resolved the first auth state (or a direct call
+ * succeeded). Gates must wait for this before redirecting signed-out users —
+ * unlike the old device-local store, resolution is asynchronous.
+ */
+export function authResolved(): boolean {
+  return typeof window !== "undefined" && resolved;
 }
 
-function readAccounts(): Accounts {
-  try {
-    const raw = window.localStorage.getItem(STUDENTS_KEY);
-    return raw ? (JSON.parse(raw) as Accounts) : {};
-  } catch {
-    return {};
-  }
-}
-
-const STORAGE_ERROR = "Couldn't save to this device — its storage is full or blocked.";
-
-/** Returns false when storage is full or blocked (private mode) — never throws. */
-function writeAccounts(accounts: Accounts): boolean {
-  try {
-    window.localStorage.setItem(STUDENTS_KEY, JSON.stringify(accounts));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Session write — same contract as writeAccounts. */
-function writeSession(email: string): boolean {
-  try {
-    window.localStorage.setItem(SESSION_KEY, email);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function readSession(): Student | null {
-  try {
-    const email = window.localStorage.getItem(SESSION_KEY);
-    if (!email) return null;
-    const account = readAccounts()[email.toLowerCase()];
-    if (!account) return null;
-    return { name: account.name, email: email.toLowerCase(), joinedAt: account.joinedAt };
-  } catch {
-    return null;
-  }
-}
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/** Whether this device has a local account for the email (pre-flight UX). */
-export function accountExists(email: string): boolean {
-  const cleanEmail = email.trim().toLowerCase();
-  return Boolean(readAccounts()[cleanEmail]);
-}
-
-export interface AuthResult {
-  ok: boolean;
-  error?: string;
-}
-
-export function signUp(name: string, email: string, password: string): AuthResult {
+export async function signUp(
+  name: string,
+  email: string,
+  password: string,
+): Promise<AuthResult> {
   const cleanName = name.trim();
   const cleanEmail = email.trim().toLowerCase();
   if (cleanName.length < 2) return { ok: false, error: "Enter your full name." };
@@ -133,74 +186,93 @@ export function signUp(name: string, email: string, password: string): AuthResul
   if (password.length < 6)
     return { ok: false, error: "Password needs at least 6 characters." };
 
-  const accounts = readAccounts();
-  if (accounts[cleanEmail])
-    return { ok: false, error: "An account already exists on this device — sign in instead." };
+  const client = auth();
+  if (!client) return { ok: false, error: NOT_CONFIGURED };
 
-  accounts[cleanEmail] = {
-    name: cleanName,
-    hash: digest(password),
-    joinedAt: new Date().toISOString(),
-  };
-  if (!writeAccounts(accounts)) return { ok: false, error: STORAGE_ERROR };
-  if (!writeSession(cleanEmail)) return { ok: false, error: STORAGE_ERROR };
-  cache = { name: cleanName, email: cleanEmail, joinedAt: accounts[cleanEmail].joinedAt };
-  emit();
-  return { ok: true };
+  try {
+    const cred = await createUserWithEmailAndPassword(client, cleanEmail, password);
+    try {
+      await updateProfile(cred.user, { displayName: cleanName });
+    } catch (cause) {
+      console.error("[auth] displayName update failed:", cause); // account exists — keep going
+    }
+    cache = {
+      name: cleanName,
+      email: cleanEmail,
+      joinedAt: cred.user.metadata.creationTime || new Date().toISOString(),
+    };
+    resolved = true;
+    emit();
+    return { ok: true };
+  } catch (cause) {
+    return { ok: false, error: authError(cause) };
+  }
 }
 
-export function signIn(email: string, password: string): AuthResult {
+export async function signIn(email: string, password: string): Promise<AuthResult> {
   const cleanEmail = email.trim().toLowerCase();
   if (!EMAIL_RE.test(cleanEmail)) return { ok: false, error: "That email doesn't look right." };
   if (!password) return { ok: false, error: "Enter your password." };
 
-  const account = readAccounts()[cleanEmail];
-  if (!account)
-    return {
-      ok: false,
-      error: "No account found on this device — create one first.",
-    };
-  if (account.hash !== digest(password))
-    return { ok: false, error: "Wrong password. Try again." };
+  const client = auth();
+  if (!client) return { ok: false, error: NOT_CONFIGURED };
 
-  if (!writeSession(cleanEmail)) return { ok: false, error: STORAGE_ERROR };
-  cache = { name: account.name, email: cleanEmail, joinedAt: account.joinedAt };
-  emit();
-  return { ok: true };
+  try {
+    const cred = await signInWithEmailAndPassword(client, cleanEmail, password);
+    cache = toStudent(cred.user);
+    resolved = true;
+    emit();
+    return { ok: true };
+  } catch (cause) {
+    return { ok: false, error: authError(cause) };
+  }
 }
 
 export function signOut(): void {
-  try {
-    window.localStorage.removeItem(SESSION_KEY);
-  } catch {
-    // Blocked storage — still drop the in-memory session below.
-  }
+  const client = auth();
   cache = null;
+  resolved = true;
   emit();
+  if (client) {
+    firebaseSignOut(client).catch((cause) => console.error("[auth] signOut failed:", cause));
+  }
 }
 
 /**
- * Password reset — only reachable after the emailed OTP passed server
- * verification. Rewrites this device's stored hash and starts a session.
+ * Asks Firebase to email a password-reset link. The link lands back on
+ * /forgot?mode=resetPassword with an oobCode, so the new password is set
+ * inside this app. Google delivers to any address — there is no SMTP of ours.
  */
-export function resetPassword(email: string, password: string): AuthResult {
+export async function sendResetEmail(email: string): Promise<AuthResult> {
   const cleanEmail = email.trim().toLowerCase();
   if (!EMAIL_RE.test(cleanEmail)) return { ok: false, error: "That email doesn't look right." };
+
+  const client = auth();
+  if (!client) return { ok: false, error: NOT_CONFIGURED };
+
+  try {
+    await sendPasswordResetEmail(client, cleanEmail, {
+      url: `${window.location.origin}/forgot?mode=resetPassword`,
+      handleCodeInApp: true,
+    });
+    return { ok: true };
+  } catch (cause) {
+    return { ok: false, error: authError(cause) };
+  }
+}
+
+/** Applies the emailed link's oobCode — the proof of inbox control. */
+export async function completeReset(oobCode: string, password: string): Promise<AuthResult> {
   if (password.length < 6)
     return { ok: false, error: "Password needs at least 6 characters." };
 
-  const accounts = readAccounts();
-  if (!accounts[cleanEmail])
-    return { ok: false, error: "No account found on this device — create one first." };
+  const client = auth();
+  if (!client) return { ok: false, error: NOT_CONFIGURED };
 
-  accounts[cleanEmail] = { ...accounts[cleanEmail], hash: digest(password) };
-  if (!writeAccounts(accounts)) return { ok: false, error: STORAGE_ERROR };
-  if (!writeSession(cleanEmail)) return { ok: false, error: STORAGE_ERROR };
-  cache = {
-    name: accounts[cleanEmail].name,
-    email: cleanEmail,
-    joinedAt: accounts[cleanEmail].joinedAt,
-  };
-  emit();
-  return { ok: true };
+  try {
+    await confirmPasswordReset(client, oobCode, password);
+    return { ok: true };
+  } catch (cause) {
+    return { ok: false, error: authError(cause) };
+  }
 }

@@ -22,21 +22,29 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   // Already signed in? Go straight to the profile builder.
   useEffect(() => {
     if (student) router.replace("/profile");
   }, [student, router]);
 
-  function submit(event: React.FormEvent): void {
+  async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
-    const result = mode === "signin" ? signIn(email, password) : signUp(name, email, password);
-    if (!result.ok) {
-      setError(result.error ?? "Something went wrong.");
-      return;
-    }
+    if (busy) return;
+    setBusy(true);
     setError(null);
-    router.push("/profile");
+    try {
+      const result =
+        mode === "signin" ? await signIn(email, password) : await signUp(name, email, password);
+      if (!result.ok) {
+        setError(result.error ?? "Something went wrong.");
+        return;
+      }
+      router.push("/profile");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -110,8 +118,14 @@ export default function LoginPage() {
               </p>
             )}
 
-            <button type="submit" className="btn btn-accent w-full">
-              {mode === "signin" ? "Sign in" : "Create account"}
+            <button type="submit" className="btn btn-accent w-full" disabled={busy}>
+              {busy
+                ? mode === "signin"
+                  ? "Signing in…"
+                  : "Creating account…"
+                : mode === "signin"
+                  ? "Sign in"
+                  : "Create account"}
             </button>
           </form>
 
@@ -131,7 +145,8 @@ export default function LoginPage() {
         </div>
 
         <p className="mt-4 text-center text-xs text-mist">
-          Accounts are saved on this device only. No password ever leaves your browser.
+          Accounts run on Firebase Authentication — sign in from any device with
+          your email and password.
         </p>
 
         <p className="mt-3 text-center text-sm">

@@ -12,8 +12,8 @@ A focused hackathon prototype: **student login → profile → personalized proj
 
 **What's in this build**
 
-- 🎓 **Student login** — device-local accounts (email + password, stored in the browser; honest demo-grade auth, no server DB).
-- 🔑 **Forgot password** — a real 6-digit OTP emailed to the registered address (5-minute expiry, attempt limit, resend cooldown); stateless HMAC verification, no server DB, and an explicit loud 503 when SMTP isn't configured instead of a fake code.
+- 🎓 **Student login** — real accounts on **Firebase Authentication** (email + password, sign in from any device); no database of our own.
+- 🔑 **Forgot password** — Google emails a reset link to any address (150/day on the free plan, no SMTP of ours); the link opens our own in-app *set a new password* screen. Loud, honest errors when Firebase is unreachable or unconfigured.
 - 🧠 **Real AI analysis** — recommendation, skill gap and roadmap from Gemini (prod) or Ollama (local); loud 502/503/504 on failure.
 - 🧱 **Weekly block diagrams** — every week renders as a `Learn → Build → Deliver` block flow, and after all weeks a **final block diagram** shows the whole journey into the final deliverable.
 - 📚 **Vetted resources in every roadmap week** — hand-picked official docs/courses matched to that week's topics (search fallbacks that are valid by construction — no AI-hallucinated links).
@@ -23,6 +23,7 @@ A focused hackathon prototype: **student login → profile → personalized proj
 ## Stack
 
 - **Next.js 16** (App Router, Turbopack) + TypeScript + Tailwind CSS v4
+- **Firebase Authentication** — cloud email/password accounts + Google-sent password-reset links (Firebase Auth emulator for local dev and E2E)
 - **Dual-mode AI layer** — local **Ollama** (`phi4-gpu` by default) or cloud **Gemini** (`gemini-3.8-flash`), selected by env, both with **JSON-schema-constrained output**
 - **zod** validation on every model reply, with one corrective retry
 - **Curated dataset** of 16 project records that grounds the model (it may only recommend ids from the shortlist)
@@ -131,7 +132,7 @@ profile ──► deterministic candidate ranking (top 8 of 16 records)
 ## Demo script (per the roadmap)
 
 1. **Landing** → logo, value proposition + live engine badge.
-2. **Login** → create a student account (email + password, saved on the device).
+2. **Login** → create a student account (email + password, backed by Firebase Auth).
 3. **Profile** → enter a 1st-year CSE-IoT student, 2–3 skills, 4 weeks.
 4. **Recommendation** → primary project + match score + *why this project* + 2–3 alternatives.
 5. **Skill Gap** → existing skills (echoed from the form) vs. skills to learn with priorities.
