@@ -1,47 +1,39 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { accountExists, resetPassword } from "@/lib/auth";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
+import { completeReset, sendResetEmail } from "@/lib/auth";
 import { LogoLockup } from "@/components/logo";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Forgot-password flow with a REAL emailed OTP:
- *   1. Enter the registered email → /api/otp/request mails a 6-digit code.
- *   2. Enter code + new password → /api/otp/verify checks the signed ticket →
- *      the local account hash is rewritten and the student is signed in.
- * The code only ever exists in the email — it is never rendered on screen.
+ * Forgot-password on Firebase Auth:
+ *   request → Google emails a reset link to the registered address (any
+ *   domain) → the link opens here (/forgot?mode=resetPassword&oobCode=…)
+ *   → set a new password in-app → sign in. The emailed link is the proof of
+ *   inbox control; there is no fallback UI and nothing is ever faked.
+ *
+ * searchParams are read at render time (inside the Suspense boundary the
+ * docs require for useSearchParams on statically prerendered pages).
  */
-export default function ForgotPasswordPage() {
+function ResetFlow() {
   const router = useRouter();
-  const [step, setStep] = useState<"request" | "verify">("request");
+  const params = useSearchParams();
+  const resetCode =
+    params.get("mode") === "resetPassword" ? params.get("oobCode") : null;
+
   const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [ticket, setTicket] = useState<{ expiresAt: number; mac: string } | null>(null);
-  const [cooldown, setCooldown] = useState(0);
-  const [ttlSeconds, setTtlSeconds] = useState(300);
-  const [attempts, setAttempts] = useState(0);
 
-  // Resend cooldown ticker (runs while on the verify step).
-  useEffect(() => {
-    if (step !== "verify" || cooldown <= 0) return;
-    const id = window.setInterval(
-      () => setCooldown((s) => (s > 0 ? s - 1 : 0)),
-      1000,
-    );
-    return () => window.clearInterval(id);
-  }, [step, cooldown]);
-
-  async function requestCode(event?: React.FormEvent) {
-    event?.preventDefault();
+  async function requestCode(event: React.FormEvent) {
+    event.preventDefault();
     setError(null);
 
     const clean = email.trim().toLowerCase();
@@ -49,68 +41,26 @@ export default function ForgotPasswordPage() {
       setError("That email doesn't look right.");
       return;
     }
-    if (!accountExists(clean)) {
-      setError("No account found on this device — create one first.");
-      return;
-    }
 
     setBusy(true);
     try {
-      const res = await fetch("/api/otp/request", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: clean }),
-        signal: AbortSignal.timeout(30_000),
-      });
-      const data = (await res.json().catch(() => null)) as
-        | { error?: string; expiresAt?: number; mac?: string; cooldownSeconds?: number; ttlSeconds?: number }
-        | null;
-
-      if (!res.ok || !data?.mac || !data.expiresAt) {
-        setError(
-          data?.error
-            ? data.error
-            : `Could not send the code — the server returned ${res.status}.`,
-        );
+      const result = await sendResetEmail(clean);
+      if (!result.ok) {
+        setError(result.error ?? "Could not send the reset link.");
         return;
       }
-
-      setTicket({ expiresAt: data.expiresAt, mac: data.mac });
-      setTtlSeconds(data.ttlSeconds ?? 300);
-      setCooldown(data.cooldownSeconds ?? 60);
-      setAttempts(0);
-      setCode("");
-      setPassword("");
-      setConfirm("");
       setNotice(
-        `Code sent to ${clean} — check your inbox (and spam). It expires in ${
-          Math.max(1, Math.round((data.ttlSeconds ?? 300) / 60))
-        } minute${(data.ttlSeconds ?? 300) <= 60 ? "" : "s"}.`,
-      );
-      setStep("verify");
-    } catch (cause) {
-      const timedOut =
-        cause instanceof DOMException &&
-        (cause.name === "TimeoutError" || cause.name === "AbortError");
-      setError(
-        timedOut
-          ? "Sending the code took too long — please try again."
-          : "Could not reach the server — check your connection and try again.",
+        `Reset link sent to ${clean} — open it on any device and you'll land back here to set a new password. Check spam if it doesn't arrive in a few minutes.`,
       );
     } finally {
       setBusy(false);
     }
   }
 
-  async function verifyAndReset(event: React.FormEvent) {
+  async function applyReset(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
 
-    const clean = email.trim().toLowerCase();
-    if (!/^\d{6}$/.test(code.trim())) {
-      setError("Enter the 6-digit code from the email.");
-      return;
-    }
     if (password.length < 6) {
       setError("New password needs at least 6 characters.");
       return;
@@ -119,65 +69,23 @@ export default function ForgotPasswordPage() {
       setError("Passwords don't match.");
       return;
     }
-    if (!ticket) {
-      setError("Request a new code first.");
+    if (!resetCode) {
+      setError("That reset link is incomplete — request a new one.");
       return;
     }
 
     setBusy(true);
     try {
-      const res = await fetch("/api/otp/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email: clean,
-          code: code.trim(),
-          expiresAt: ticket.expiresAt,
-          mac: ticket.mac,
-        }),
-        signal: AbortSignal.timeout(30_000),
-      });
-      const data = (await res.json().catch(() => null)) as { error?: string } | null;
-
-      if (!res.ok) {
-        const next = attempts + 1;
-        setAttempts(next);
-        if (next >= 5 || res.status === 429) {
-          setStep("request");
-          setTicket(null);
-          setNotice(null);
-          setError("Too many wrong attempts — request a fresh code.");
-        } else {
-          setError(
-            `${data?.error ?? `Verification failed — the server returned ${res.status}.`} (${
-              5 - next
-            } attempt${5 - next === 1 ? "" : "s"} left)`,
-          );
-        }
-        return;
-      }
-
-      const result = resetPassword(clean, password);
+      const result = await completeReset(resetCode, password);
       if (!result.ok) {
-        setError(result.error ?? "Could not update the password on this device.");
+        setError(result.error ?? "Could not update the password.");
         return;
       }
-      router.push("/profile");
-    } catch (cause) {
-      const timedOut =
-        cause instanceof DOMException &&
-        (cause.name === "TimeoutError" || cause.name === "AbortError");
-      setError(
-        timedOut
-          ? "Verification took too long — please try again."
-          : "Could not reach the server — check your connection and try again.",
-      );
+      setDone(true);
     } finally {
       setBusy(false);
     }
   }
-
-  const ttlMinutes = Math.max(1, Math.round(ttlSeconds / 60));
 
   return (
     <div className="flex flex-1 items-center justify-center px-6 py-14">
@@ -186,59 +94,33 @@ export default function ForgotPasswordPage() {
           <div className="flex flex-col items-center text-center">
             <LogoLockup width={200} />
             <h1 className="mt-5 text-2xl font-semibold tracking-tight">
-              {step === "request" ? "Forgot your password?" : "Enter your code"}
+              {done
+                ? "Password updated"
+                : resetCode
+                  ? "Set a new password"
+                  : "Forgot your password?"}
             </h1>
             <p className="mt-2 text-sm text-mist">
-              {step === "request"
-                ? "Enter the email you signed up with on this device — we’ll email you a 6-digit code."
-                : `We emailed a 6-digit code to ${email}. It expires in ${ttlMinutes} minute${
-                    ttlSeconds <= 60 ? "" : "s"
-                  }.`}
+              {done
+                ? "Your password has been changed. Sign in with it to continue."
+                : resetCode
+                  ? "Pick a new password for your ProjectsForge account."
+                  : "Enter the email you signed up with — we'll email you a reset link."}
             </p>
           </div>
 
-          {step === "request" ? (
-            <form onSubmit={requestCode} className="mt-7 space-y-4">
-              <label className="block">
-                <span className="label">Email</span>
-                <input
-                  className="field"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@college.edu"
-                  autoComplete="email"
-                />
-              </label>
-
-              {error && (
-                <p
-                  role="alert"
-                  className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
-                >
-                  {error}
-                </p>
-              )}
-
-              <button type="submit" className="btn btn-accent w-full" disabled={busy}>
-                {busy ? "Sending…" : "Email me a code"}
+          {done ? (
+            <div className="mt-7 space-y-4">
+              <button
+                type="button"
+                className="btn btn-accent w-full"
+                onClick={() => router.push("/login")}
+              >
+                Go to sign in
               </button>
-            </form>
-          ) : (
-            <form onSubmit={verifyAndReset} className="mt-7 space-y-4">
-              <label className="block">
-                <span className="label">6-digit code</span>
-                <input
-                  className="field text-center font-mono tracking-[0.4em]"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                  placeholder="123456"
-                  autoComplete="one-time-code"
-                />
-              </label>
-
+            </div>
+          ) : resetCode ? (
+            <form onSubmit={applyReset} noValidate className="mt-7 space-y-4">
               <label className="block">
                 <span className="label">New password</span>
                 <input
@@ -263,6 +145,33 @@ export default function ForgotPasswordPage() {
                 />
               </label>
 
+              {error && (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+                >
+                  {error}
+                </p>
+              )}
+
+              <button type="submit" className="btn btn-accent w-full" disabled={busy}>
+                {busy ? "Updating…" : "Update password"}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={requestCode} noValidate className="mt-7 space-y-4">
+              <label className="block">
+                <span className="label">Email</span>
+                <input
+                  className="field"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@college.edu"
+                  autoComplete="email"
+                />
+              </label>
+
               {notice && (
                 <div className="rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-xs text-accent">
                   {notice}
@@ -278,32 +187,34 @@ export default function ForgotPasswordPage() {
                 </p>
               )}
 
-              <button type="submit" className="btn btn-accent w-full" disabled={busy || !ticket}>
-                {busy ? "Verifying…" : "Reset password"}
+              <button type="submit" className="btn btn-accent w-full" disabled={busy}>
+                {busy ? "Sending…" : "Email me a reset link"}
               </button>
-
-              <div className="flex items-center justify-between text-xs">
-                <button
-                  type="button"
-                  onClick={() => requestCode()}
-                  disabled={cooldown > 0 || busy}
-                  className="text-sky hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
-                </button>
-                <Link href="/login" className="text-mist transition hover:text-chalk">
-                  ← Back to sign in
-                </Link>
-              </div>
             </form>
+          )}
+
+          {!resetCode && (
+            <p className="mt-5 text-center text-sm">
+              <Link href="/login" className="text-mist transition hover:text-chalk">
+                ← Back to sign in
+              </Link>
+            </p>
           )}
         </div>
 
         <p className="mt-4 text-center text-xs text-mist">
-          Codes are sent by real email and expire in {ttlMinutes} minute
-          {ttlSeconds <= 60 ? "" : "s"} — the code never appears on screen.
+          Reset emails are sent by Google to your own address — the link is the
+          proof, and it only works for your account.
         </p>
       </div>
     </div>
+  );
+}
+
+export default function ForgotPasswordPage() {
+  return (
+    <Suspense fallback={null}>
+      <ResetFlow />
+    </Suspense>
   );
 }
