@@ -44,3 +44,6 @@ next-env.d.ts
 pitch/unpacked/
 .vercel
 .env*
+
+# Firebase emulator logs
+firebase-debug.log
