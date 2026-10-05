@@ -46,6 +46,12 @@ type Listener = () => void;
 const listeners = new Set<Listener>();
 let cache: Student | null = null;
 let resolved = false;
+/**
+ * Name entered at signup. Set BEFORE createUser so any auth-state event that
+ * arrives while displayName is still being written shows the real name (not
+ * the email prefix); cleared on sign-out so it can never resurrect a session.
+ */
+let pendingName: string | null = null;
 let authInstance: Auth | null = null;
 
 const firebaseConfig = {
@@ -72,7 +78,7 @@ function emit(): void {
 function toStudent(user: User): Student {
   const email = (user.email ?? "").toLowerCase();
   return {
-    name: user.displayName?.trim() || email.split("@")[0] || "Student",
+    name: user.displayName?.trim() || pendingName || email.split("@")[0] || "Student",
     email,
     joinedAt: user.metadata.creationTime || new Date().toISOString(),
   };
@@ -190,12 +196,12 @@ export async function signUp(
   if (!client) return { ok: false, error: NOT_CONFIGURED };
 
   try {
+    pendingName = cleanName;
     const cred = await createUserWithEmailAndPassword(client, cleanEmail, password);
-    try {
-      await updateProfile(cred.user, { displayName: cleanName });
-    } catch (cause) {
-      console.error("[auth] displayName update failed:", cause); // account exists — keep going
-    }
+    // Publish the session BEFORE the profile write. updateProfile can take
+    // seconds (observed 15s+ against the live API); if the cache assignment
+    // waited for it, a response landing AFTER sign-out would resurrect the
+    // session — a late-response stomp the real-config smoke test caught.
     cache = {
       name: cleanName,
       email: cleanEmail,
@@ -203,8 +209,19 @@ export async function signUp(
     };
     resolved = true;
     emit();
+    // Fire-and-forget the display-name write. Awaiting it held signUp() open
+    // for seconds (observed 15s+ on the live API), so the login page's success
+    // navigation (router.push("/profile")) fired long after the user had
+    // signed out and moved on — a stale navigation that bounced
+    // login → profile → login, remounted the form and silently discarded an
+    // in-flight sign-in error. pendingName keeps the entered name visible
+    // until displayName lands.
+    void updateProfile(cred.user, { displayName: cleanName }).catch((cause) => {
+      console.error("[auth] displayName update failed:", cause); // account exists — keep going
+    });
     return { ok: true };
   } catch (cause) {
+    pendingName = null;
     return { ok: false, error: authError(cause) };
   }
 }
@@ -231,6 +248,7 @@ export async function signIn(email: string, password: string): Promise<AuthResul
 export function signOut(): void {
   const client = auth();
   cache = null;
+  pendingName = null;
   resolved = true;
   emit();
   if (client) {
