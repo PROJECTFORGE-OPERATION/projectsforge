@@ -78,8 +78,26 @@ function readAccounts(): Accounts {
   }
 }
 
-function writeAccounts(accounts: Accounts): void {
-  window.localStorage.setItem(STUDENTS_KEY, JSON.stringify(accounts));
+const STORAGE_ERROR = "Couldn't save to this device — its storage is full or blocked.";
+
+/** Returns false when storage is full or blocked (private mode) — never throws. */
+function writeAccounts(accounts: Accounts): boolean {
+  try {
+    window.localStorage.setItem(STUDENTS_KEY, JSON.stringify(accounts));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Session write — same contract as writeAccounts. */
+function writeSession(email: string): boolean {
+  try {
+    window.localStorage.setItem(SESSION_KEY, email);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function readSession(): Student | null {
@@ -118,8 +136,8 @@ export function signUp(name: string, email: string, password: string): AuthResul
     hash: digest(password),
     joinedAt: new Date().toISOString(),
   };
-  writeAccounts(accounts);
-  window.localStorage.setItem(SESSION_KEY, cleanEmail);
+  if (!writeAccounts(accounts)) return { ok: false, error: STORAGE_ERROR };
+  if (!writeSession(cleanEmail)) return { ok: false, error: STORAGE_ERROR };
   cache = { name: cleanName, email: cleanEmail, joinedAt: accounts[cleanEmail].joinedAt };
   emit();
   return { ok: true };
@@ -139,14 +157,18 @@ export function signIn(email: string, password: string): AuthResult {
   if (account.hash !== digest(password))
     return { ok: false, error: "Wrong password. Try again." };
 
-  window.localStorage.setItem(SESSION_KEY, cleanEmail);
+  if (!writeSession(cleanEmail)) return { ok: false, error: STORAGE_ERROR };
   cache = { name: account.name, email: cleanEmail, joinedAt: account.joinedAt };
   emit();
   return { ok: true };
 }
 
 export function signOut(): void {
-  window.localStorage.removeItem(SESSION_KEY);
+  try {
+    window.localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // Blocked storage — still drop the in-memory session below.
+  }
   cache = null;
   emit();
 }

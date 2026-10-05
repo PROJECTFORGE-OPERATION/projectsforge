@@ -82,7 +82,7 @@ export default function ProfilePage() {
   const careerGoal = form.careerGoal ?? draft?.profile.careerGoal ?? "";
   const weeks = form.weeks ?? draft?.profile.availableWeeks ?? 4;
 
-  // Elapsed-seconds ticker while the local model is thinking.
+  // Elapsed-seconds ticker while the AI model is thinking.
   useEffect(() => {
     if (!submitting) return;
     timerRef.current = window.setInterval(() => setElapsed((s) => s + 1), 1000);
@@ -91,13 +91,16 @@ export default function ProfilePage() {
     };
   }, [submitting]);
 
-  // Students must be signed in before building a profile.
-  // Reads the store directly instead of `student`: during hydration the hook
-  // still returns the server snapshot (null) when effects fire, which would
-  // falsely redirect even though localStorage has a session.
+  // Students must be signed in before building a profile — and are sent back
+  // to login if they sign out while on this page.
+  // Reads the store directly instead of trusting `student`: during hydration
+  // the hook still returns the server snapshot (null) when effects fire, which
+  // would falsely redirect even though localStorage has a session. Requiring
+  // BOTH the store and the hook to be null keeps hydration safe while still
+  // catching a real sign-out (they flip to null together).
   useEffect(() => {
-    if (getAuthSnapshot() === null) router.replace("/login");
-  }, [router]);
+    if (getAuthSnapshot() === null && student === null) router.replace("/login");
+  }, [student, router]);
 
   function patch<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -152,15 +155,28 @@ export default function ProfilePage() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
+        // The API answers inside its 60s function cap; this only trips if the
+        // connection itself hangs, so a stuck spinner can't run forever.
+        signal: AbortSignal.timeout(150_000),
       });
-      const data = (await res.json()) as AnalyzeResponse | { error: string };
+      // A platform-level kill (e.g. a serverless 504) can come back with a
+      // non-JSON body — parse defensively so that still surfaces loudly.
+      const data = (await res.json().catch(() => null)) as
+        | AnalyzeResponse
+        | { error: string }
+        | null;
 
       if (!res.ok) {
         setServerError(
-          "error" in data && typeof data.error === "string"
+          data && "error" in data && typeof data.error === "string"
             ? data.error
-            : `Analysis failed (${res.status}).`,
+            : `Analysis failed — the server returned ${res.status} without details.`,
         );
+        return;
+      }
+
+      if (!data || !("analysis" in data)) {
+        setServerError("Analysis failed — the server returned an unexpected response.");
         return;
       }
 
@@ -168,9 +184,14 @@ export default function ProfilePage() {
       saveRun(run);
       saveDraft(run);
       router.push("/result");
-    } catch {
+    } catch (cause) {
+      const timedOut =
+        cause instanceof DOMException &&
+        (cause.name === "TimeoutError" || cause.name === "AbortError");
       setServerError(
-        "Could not reach the app server. Is the dev server still running?",
+        timedOut
+          ? "The analysis took too long and was cancelled — please try again."
+          : "Could not reach the server — check your connection and try again.",
       );
     } finally {
       setSubmitting(false);
@@ -403,8 +424,8 @@ export default function ProfilePage() {
 
         {submitting && (
           <p className="mt-4 text-center text-xs text-mist">
-            Running the local model — recommendation, skill gap and roadmap in one
-            pass. Small models can take 15–60 seconds.
+            Running the AI model — recommendation, skill gap and roadmap in one
+            pass. Responses usually take 15–60 seconds.
           </p>
         )}
       </form>
