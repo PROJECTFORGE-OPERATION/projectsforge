@@ -114,6 +114,12 @@ function readSession(): Student | null {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Whether this device has a local account for the email (pre-flight UX). */
+export function accountExists(email: string): boolean {
+  const cleanEmail = email.trim().toLowerCase();
+  return Boolean(readAccounts()[cleanEmail]);
+}
+
 export interface AuthResult {
   ok: boolean;
   error?: string;
@@ -171,4 +177,30 @@ export function signOut(): void {
   }
   cache = null;
   emit();
+}
+
+/**
+ * Password reset — only reachable after the emailed OTP passed server
+ * verification. Rewrites this device's stored hash and starts a session.
+ */
+export function resetPassword(email: string, password: string): AuthResult {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!EMAIL_RE.test(cleanEmail)) return { ok: false, error: "That email doesn't look right." };
+  if (password.length < 6)
+    return { ok: false, error: "Password needs at least 6 characters." };
+
+  const accounts = readAccounts();
+  if (!accounts[cleanEmail])
+    return { ok: false, error: "No account found on this device — create one first." };
+
+  accounts[cleanEmail] = { ...accounts[cleanEmail], hash: digest(password) };
+  if (!writeAccounts(accounts)) return { ok: false, error: STORAGE_ERROR };
+  if (!writeSession(cleanEmail)) return { ok: false, error: STORAGE_ERROR };
+  cache = {
+    name: accounts[cleanEmail].name,
+    email: cleanEmail,
+    joinedAt: accounts[cleanEmail].joinedAt,
+  };
+  emit();
+  return { ok: true };
 }

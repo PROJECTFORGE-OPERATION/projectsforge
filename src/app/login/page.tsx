@@ -93,6 +93,14 @@ export default function LoginPage() {
               />
             </label>
 
+            {mode === "signin" && (
+              <div className="-mt-2 text-right">
+                <Link href="/forgot" className="text-xs text-sky hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
+            )}
+
             {error && (
               <p
                 role="alert"
