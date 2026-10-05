@@ -8,7 +8,7 @@
 
 **🟢 Live demo: https://projectsforge-nu.vercel.app** (Gemini cloud mode) — locally the same app runs on Ollama with no API key (see Configuration).
 
-A focused hackathon prototype: **student login → profile → personalized project recommendation → skill gap → weekly block-diagram roadmap with vetted resources → feedback straight to the team's WhatsApp**. One strong working journey, powered by real AI — no canned demo data, no fallback mode.
+A focused hackathon prototype: **student login → profile → personalized project recommendation → skill gap → weekly block-diagram roadmap with vetted resources → feedback straight to the team's WhatsApp → mark project complete → Communication Skills (self-introduction + interview guide)**. One strong working journey, powered by real AI — no canned demo data, no fallback mode.
 
 **What's in this build**
 
@@ -16,7 +16,10 @@ A focused hackathon prototype: **student login → profile → personalized proj
 - 🔑 **Forgot password** — Google emails a reset link to any address (150/day on the free plan, no SMTP of ours); the link opens our own in-app *set a new password* screen. Loud, honest errors when Firebase is unreachable or unconfigured.
 - 🧠 **Real AI analysis** — recommendation, skill gap and roadmap from Gemini (prod) or Ollama (local); loud 502/503/504 on failure.
 - 🧱 **Weekly block diagrams** — every week renders as a `Learn → Build → Deliver` block flow, and after all weeks a **final block diagram** shows the whole journey into the final deliverable.
-- 📚 **Vetted resources in every roadmap week** — hand-picked official docs/courses matched to that week's topics (search fallbacks that are valid by construction — no AI-hallucinated links).
+- 📚 **Vetted resources in every roadmap week** — hand-picked official docs/courses matched to that week's topics, and **a video in every week**: direct links for major topics (freeCodeCamp/Dave Gray, oEmbed-verified at curation time) plus a YouTube search for the rest — marked with ▶. Search fallbacks are valid by construction, so no AI-hallucinated links exist.
+- 📝 **Profile background** — hobbies, schooling and college are asked alongside branch/year/skills (all optional), feeding both the analysis and the self-introduction.
+- 🗣️ **AI self-introduction** — auto-generated the first time the *Self-intro* tab is opened: first person, 90–140 words, grounded strictly in the profile (regenerated automatically when the profile changes; Copy + Regenerate; loud errors, zero canned text).
+- 🔒 **Communication Skills section** — locked until the student **marks a project complete** on the roadmap. Unlocked, it holds the self-introduction, the completed-project record (stack, weeks, skills covered, why-matched, final deliverable) and a curated interview guide (introduce yourself, explain your project, technical questions, STAR method) with verified links.
 - 💬 **WhatsApp feedback** — rate + comment + suggestions on the result page (and a one-click check-in under each week) open a prefilled WhatsApp message to the team; email fallback always available.
 - 📧 **Footer contact** — `projectforgestartup@gmail.com` on every page, plus suggestions welcome.
 
@@ -138,6 +141,9 @@ profile ──► deterministic candidate ranking (top 8 of 16 records)
 5. **Skill Gap** → existing skills (echoed from the form) vs. skills to learn with priorities.
 6. **Roadmap** → weekly **block diagram** (`Learn → Build → Deliver`) with vetted resources per week, then the **final block diagram** (phases → final deliverable), plus honest risks & assumptions.
 7. **Feedback** → star rating + comments + suggestions → prefilled WhatsApp message to the team (email fallback). Each week also has a one-click "week done" check-in.
+8. **Self-intro tab** → the AI writes your first-person introduction from the profile (name → branch/year → background → skills → goal → hobbies); Copy / Regenerate.
+9. **Communication Skills** → visiting it before finishing a project shows the *locked* card; after clicking **Mark project complete** on the roadmap it opens with the self-intro, the completed-project record and the interview guide.
+10. **Video in every week** → each week's resources carry at least one ▶ video link alongside the docs.
 
 **Personalization proof:** change one field (e.g. 4 → 12 weeks, or add "Arduino") and re-run — the recommendation, skill gap and roadmap visibly change.
 

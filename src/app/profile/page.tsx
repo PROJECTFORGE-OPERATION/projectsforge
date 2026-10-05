@@ -44,6 +44,9 @@ type FieldErrors = Partial<
 interface FormState {
   branch: Branch | null;
   year: Year | null;
+  hobbies: string | null;
+  schooling: string | null;
+  college: string | null;
   skills: string[] | null;
   interests: Interest[] | null;
   careerGoal: CareerGoal | null;
@@ -53,6 +56,9 @@ interface FormState {
 const EMPTY_FORM: FormState = {
   branch: null,
   year: null,
+  hobbies: null,
+  schooling: null,
+  college: null,
   skills: null,
   interests: null,
   careerGoal: null,
@@ -79,6 +85,9 @@ export default function ProfilePage() {
   // Effective values: local edit > saved draft > empty default.
   const branch = form.branch ?? draft?.profile.branch ?? "";
   const year = form.year ?? draft?.profile.year ?? "";
+  const hobbies = form.hobbies ?? draft?.profile.hobbies ?? "";
+  const schooling = form.schooling ?? draft?.profile.schooling ?? "";
+  const college = form.college ?? draft?.profile.college ?? "";
   const skills = form.skills ?? draft?.profile.skills ?? [];
   const interests = form.interests ?? draft?.profile.interests ?? [];
   const careerGoal = form.careerGoal ?? draft?.profile.careerGoal ?? "";
@@ -156,7 +165,17 @@ export default function ProfilePage() {
       return;
     }
 
-    const payload = { branch, year, skills, interests, careerGoal, availableWeeks: weeks };
+    const payload = {
+      branch,
+      year,
+      skills,
+      interests,
+      careerGoal,
+      availableWeeks: weeks,
+      hobbies,
+      schooling,
+      college,
+    };
 
     setSubmitting(true);
     setElapsed(0);
@@ -276,6 +295,47 @@ export default function ProfilePage() {
             ))}
           </div>
           {errors.year && <p className="mt-2 text-xs text-danger">{errors.year}</p>}
+        </section>
+
+        {/* Background (hobbies / schooling / college) ---------------------- */}
+        <section className="card mt-4 p-5">
+          <span className="label">Your background</span>
+          <p className="text-xs text-mist">
+            Used to write your self-introduction for interviews. All three are
+            optional — fill what you can.
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <label className="block">
+              <span className="text-xs text-mist">Hobbies</span>
+              <input
+                className="field mt-1"
+                value={hobbies}
+                placeholder="e.g. Cricket, drawing, chess"
+                maxLength={300}
+                onChange={(e) => patch("hobbies", e.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-mist">Schooling</span>
+              <input
+                className="field mt-1"
+                value={schooling}
+                placeholder="e.g. Sri Chaitanya Jr College (10th & 12th)"
+                maxLength={300}
+                onChange={(e) => patch("schooling", e.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-mist">College</span>
+              <input
+                className="field mt-1"
+                value={college}
+                placeholder="e.g. JNTU Kakinada"
+                maxLength={300}
+                onChange={(e) => patch("college", e.target.value)}
+              />
+            </label>
+          </div>
         </section>
 
         {/* Skills ------------------------------------------------------- */}

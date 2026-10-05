@@ -72,6 +72,12 @@ export const profileSchema = z.object({
   interests: z.array(z.enum(INTERESTS)).min(1).max(5),
   careerGoal: z.enum(CAREER_GOALS),
   availableWeeks: z.number().int().min(1).max(16),
+  // Background asked at profile time (hobbies / schooling / college) — feeds
+  // the self-introduction generator. Optional with a default so older stored
+  // drafts and minimal API callers still validate cleanly.
+  hobbies: z.string().trim().max(300).default(""),
+  schooling: z.string().trim().max(300).default(""),
+  college: z.string().trim().max(300).default(""),
 });
 export type StudentProfile = z.infer<typeof profileSchema>;
 
@@ -158,3 +164,19 @@ export interface ErrorResponse {
   error: string;
   issues?: string[];
 }
+
+/**
+ * Self-introduction generator output. Length bounds live in the schema so the
+ * constrained decoder can never emit a one-line stub or a multi-page essay.
+ */
+export const introductionSchema = z.object({
+  introduction: z.string().min(80).max(1600),
+});
+export type Introduction = z.infer<typeof introductionSchema>;
+
+/** Request body for POST /api/intro (name is not part of the profile). */
+export const introRequestSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  profile: profileSchema,
+});
+export type IntroRequest = z.infer<typeof introRequestSchema>;
