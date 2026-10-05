@@ -396,7 +396,10 @@ export default function ProfilePage() {
 
         {/* Errors + submit ---------------------------------------------- */}
         {serverError && (
-          <div className="mt-5 rounded-xl border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
+          <div
+            role="alert"
+            className="mt-5 rounded-xl border border-danger/40 bg-danger/10 p-4 text-sm text-danger"
+          >
             <span className="font-semibold">AI engine error:</span> {serverError}
             <p className="mt-1 text-xs opacity-80">
               This app has no canned fallback — fix the engine and retry.
