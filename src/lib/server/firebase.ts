@@ -1,5 +1,5 @@
+import { createPublicKey, verify as verifyRsa } from "node:crypto";
 import { cert, getApps, initializeApp, type App, type ServiceAccount } from "firebase-admin/app";
-import { getAuth, type DecodedIdToken } from "firebase-admin/auth";
 import { FieldValue, getFirestore, type Firestore } from "firebase-admin/firestore";
 import type {
   AnalyzeResponse,
@@ -97,6 +97,150 @@ export function apiErrorResponse(cause: unknown): Response | null {
 }
 
 /**
+ * Verify a Firebase ID token against Google's public JWKS.
+ *
+ * Deliberately NOT `firebase-admin/auth`: that entry point pulls in
+ * jwks-rsa → jose, an ESM-only chain that dies with ERR_REQUIRE_ESM when a
+ * Vercel lambda loads it — an empty 500 on every route that imports it. The
+ * Admin app and Firestore load fine there, so identity is checked here
+ * instead with the platform's own crypto: the same checks firebase-admin
+ * makes (RS256 signature, issuer, audience, expiry, subject), no extra
+ * dependencies.
+ */
+
+const SESSION_INVALID = "Your session is no longer valid — sign out and sign back in.";
+const JWKS_URL =
+  "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
+const JWKS_TTL_MS = 10 * 60 * 1000;
+
+interface JwkKey {
+  kty?: string;
+  n?: string;
+  e?: string;
+  kid?: string;
+}
+
+interface IdClaims {
+  sub: string;
+  email?: string;
+  name?: string;
+  auth_time?: number;
+}
+
+let jwksCache: { keys: JwkKey[]; at: number } | null = null;
+let jwksInFlight: Promise<JwkKey[]> | null = null;
+
+/** Google's signing keys — cached per lambda; `force` busts it (key rotation). */
+async function googleKeys(force: boolean): Promise<JwkKey[]> {
+  if (!force && jwksCache && Date.now() - jwksCache.at < JWKS_TTL_MS) return jwksCache.keys;
+  if (!jwksInFlight) {
+    jwksInFlight = (async () => {
+      let res: Response;
+      try {
+        res = await fetch(JWKS_URL);
+      } catch (cause) {
+        throw new ApiError(
+          503,
+          `Sessions can't be checked right now — Google's key service is unreachable (${String(cause).slice(0, 80)}). Try again in a moment.`,
+        );
+      }
+      if (!res.ok) {
+        throw new ApiError(
+          503,
+          `Sessions can't be checked right now — Google's key service answered ${res.status}. Try again in a moment.`,
+        );
+      }
+      const body = (await res.json().catch(() => null)) as { keys?: JwkKey[] } | null;
+      const keys = Array.isArray(body?.keys) ? body.keys : [];
+      jwksCache = { keys, at: Date.now() };
+      return keys;
+    })().finally(() => {
+      jwksInFlight = null;
+    });
+  }
+  return jwksInFlight;
+}
+
+async function verifyGoogleIdToken(token: string, projectId: string): Promise<IdClaims> {
+  const parts = token.split(".");
+  if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
+    throw new ApiError(401, SESSION_INVALID);
+  }
+  const [head, body, signature] = parts;
+
+  let header: { alg?: unknown; kid?: unknown };
+  try {
+    header = JSON.parse(Buffer.from(head, "base64url").toString("utf8")) as {
+      alg?: unknown;
+      kid?: unknown;
+    };
+  } catch {
+    throw new ApiError(401, SESSION_INVALID);
+  }
+  if (header.alg !== "RS256" || typeof header.kid !== "string") {
+    throw new ApiError(401, SESSION_INVALID);
+  }
+
+  let claims: {
+    sub?: unknown;
+    email?: unknown;
+    name?: unknown;
+    auth_time?: unknown;
+    iss?: unknown;
+    aud?: unknown;
+    exp?: unknown;
+  };
+  try {
+    claims = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+  } catch {
+    throw new ApiError(401, SESSION_INVALID);
+  }
+
+  let keys = await googleKeys(false);
+  let key = keys.find((candidate) => candidate.kid === header.kid);
+  if (!key) {
+    keys = await googleKeys(true); // rotated key id — bust the cache once
+    key = keys.find((candidate) => candidate.kid === header.kid);
+  }
+  if (!key) throw new ApiError(401, SESSION_INVALID);
+
+  let signed = false;
+  try {
+    const publicKey = createPublicKey({ key: { kty: key.kty, n: key.n, e: key.e }, format: "jwk" });
+    signed = verifyRsa(
+      "RSA-SHA256",
+      Buffer.from(`${head}.${body}`),
+      publicKey,
+      Buffer.from(signature, "base64url"),
+    );
+  } catch {
+    signed = false;
+  }
+  if (!signed) throw new ApiError(401, SESSION_INVALID);
+
+  const now = Math.floor(Date.now() / 1000);
+  const sub = claims.sub;
+  if (
+    claims.iss !== `https://securetoken.google.com/${projectId}` ||
+    claims.aud !== projectId ||
+    typeof claims.exp !== "number" ||
+    claims.exp <= now ||
+    typeof sub !== "string" ||
+    !sub ||
+    sub.length > 128
+  ) {
+    throw new ApiError(401, SESSION_INVALID);
+  }
+
+  return {
+    sub,
+    email: typeof claims.email === "string" ? claims.email : undefined,
+    name: typeof claims.name === "string" ? claims.name : undefined,
+    auth_time: typeof claims.auth_time === "number" ? claims.auth_time : undefined,
+  };
+}
+
+/**
  * Verify the caller's `Authorization: Bearer <idToken>` header.
  * Throws ApiError(401/503) with plain-word copy — never a stack trace.
  */
@@ -110,11 +254,22 @@ export async function requireUser(request: Request): Promise<ServerUser> {
     throw new ApiError(401, "Sign in required — this request didn't include your session.");
   }
 
-  let decoded: DecodedIdToken;
+  const projectId =
+    instance.options.projectId ?? process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID?.trim();
+  if (!projectId) {
+    throw new ApiError(
+      503,
+      "This server doesn't know its Firebase project id — set NEXT_PUBLIC_FIREBASE_PROJECT_ID and redeploy.",
+    );
+  }
+
+  let decoded: IdClaims;
   try {
-    decoded = await getAuth(instance).verifyIdToken(match[1]);
-  } catch {
-    throw new ApiError(401, "Your session is no longer valid — sign out and sign back in.");
+    decoded = await verifyGoogleIdToken(match[1], projectId);
+  } catch (cause) {
+    // A key-service outage stays loud (503); anything else is a bad session.
+    if (cause instanceof ApiError && cause.status === 503) throw cause;
+    throw new ApiError(401, SESSION_INVALID);
   }
 
   const email = (decoded.email ?? "").trim().toLowerCase();
@@ -123,7 +278,7 @@ export async function requireUser(request: Request): Promise<ServerUser> {
   }
   const displayName = (decoded.name ?? "").trim() || null;
   return {
-    uid: decoded.uid,
+    uid: decoded.sub,
     email,
     displayName,
     authTime: typeof decoded.auth_time === "number" ? decoded.auth_time : 0,
