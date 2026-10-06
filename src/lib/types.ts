@@ -56,6 +56,21 @@ export const SKILL_SUGGESTIONS = [
 export const DIFFICULTIES = ["Beginner", "Intermediate", "Advanced"] as const;
 export type Difficulty = (typeof DIFFICULTIES)[number];
 
+/**
+ * Project tiers (Phase 3 allotment).
+ *  - "strong"  = portfolio-grade: multi-system depth (CV/ML/security/real-time
+ *    /closed-loop embedded) that survives interview probing. One per student
+ *    per year; 3-4 across four years is the intended pace.
+ *  - "normal"  = focused single-paradigm builds (CRUD, dashboards, basic
+ *    embedded) — good practice, lighter interview return.
+ */
+export const PROJECT_TIERS = ["normal", "strong"] as const;
+export type ProjectTier = (typeof PROJECT_TIERS)[number];
+
+/** Allotment limits (Phase 3) — enforced server-side, surfaced loudly. */
+export const MAX_PROJECTS_PER_YEAR = 7;
+export const MAX_STRONG_PER_YEAR = 1;
+
 /** "1st year" -> 1 */
 export function yearNumber(year: Year): number {
   return Number.parseInt(year.slice(0, 1), 10) || 1;
@@ -208,6 +223,16 @@ export interface CompletionRecord {
   skillsCovered: string[];
   weeks: number;
   completedAt: string;
+  /* Phase 3: the full A→Z story, snapshotted at completion time so it
+   * survives fresh devices and profile edits. Optional for older records. */
+  /** What the project is (one paragraph, from the curated catalog). */
+  summary?: string;
+  /** Why it was recommended to this student — the "why this project" answer. */
+  why?: string;
+  /** Catalog difficulty at completion time. */
+  difficulty?: string;
+  /** Week-by-week build story: "Week 1 — deliverable", newest roadmap first. */
+  build?: string[];
 }
 
 export const storedIntroSchema = z.object({
@@ -223,6 +248,10 @@ export const completionRecordSchema = z.object({
   skillsCovered: z.array(z.string().max(120)).max(80),
   weeks: z.number().int().min(0).max(520),
   completedAt: z.string().max(60),
+  summary: z.string().max(600).optional(),
+  why: z.string().max(1200).optional(),
+  difficulty: z.string().max(30).optional(),
+  build: z.array(z.string().max(300)).max(60).optional(),
 });
 
 /** Request body for POST /api/records. */
@@ -244,4 +273,45 @@ export interface RecordsResponse {
   run: AnalyzeResponse | null;
   runCount: number;
   introCount: number;
+  /** Phase 3: this student's project allotments (mirror on their doc). */
+  claims?: ClaimRecord[];
+  /** Phase 3: year-scoped allotment counters, computed server-side. */
+  counters?: YearCounters;
+  /** Phase 3: recommendation ids currently allotted to OTHER students. */
+  taken?: string[];
+}
+
+/* --- project allotment (Phase 3) ---------------------------------------- */
+
+/** A project allotted to one student — unique across the platform. */
+export const claimRecordSchema = z.object({
+  projectId: z.string().min(1).max(200),
+  title: z.string().min(1).max(300),
+  tier: z.enum(PROJECT_TIERS),
+  claimedAt: z.string().max(60),
+});
+export type ClaimRecord = z.infer<typeof claimRecordSchema>;
+
+/** Request body for POST /api/claim — tier is derived server-side. */
+export const claimRequestSchema = z.object({
+  projectId: z.string().trim().min(1).max(200),
+  title: z.string().trim().min(1).max(300),
+});
+export type ClaimRequest = z.infer<typeof claimRequestSchema>;
+
+/** Server-computed caps for the current year (defaults are the limits). */
+export interface YearCounters {
+  year: number;
+  yearUsed: number;
+  yearMax: number;
+  strongUsed: number;
+  strongMax: number;
+}
+
+/** Success payload for POST /api/claim — warning is loud copy when near cap. */
+export interface ClaimSuccess {
+  ok: true;
+  claims: ClaimRecord[];
+  counters: YearCounters;
+  warning?: string;
 }

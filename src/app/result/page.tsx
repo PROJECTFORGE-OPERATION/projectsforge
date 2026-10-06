@@ -13,6 +13,7 @@ import {
   type StoredRun,
 } from "@/lib/session";
 import type { Analysis, Recommendation, RoadmapWeek } from "@/lib/types";
+import { projectById, tierOf } from "@/lib/projects";
 import { copyReport, downloadReport } from "@/lib/report";
 import { resourcesForWeek } from "@/lib/resources";
 import { buildMailtoUrl, openWhatsApp, whatsappConfigured } from "@/lib/whatsapp";
@@ -21,17 +22,22 @@ import {
   getServerSnapshot as getAuthServerSnapshot,
   subscribeAuth,
 } from "@/lib/auth";
-import { Monogram } from "@/components/logo";
-import { AccountChip } from "@/components/account-chip";
 import { ResourceLink } from "@/components/resource-link";
+import { AllotmentBanner } from "@/components/allotment-banner";
 import { SelfIntroCard } from "@/components/self-intro";
 import {
+  addClaim,
   addCompletion,
+  getClaimsServerSnapshot,
+  getClaimsSnapshot,
   getCompletedServerSnapshot,
   getCompletedSnapshot,
   getServerResolvedSnapshot,
+  getTakenServerSnapshot,
+  getTakenSnapshot,
   loadRecords,
   recordsResolved,
+  subscribeClaims,
   subscribeCompleted,
 } from "@/lib/records";
 
@@ -53,7 +59,17 @@ const PRIORITY_STYLES: Record<string, string> = {
 export default function ResultPage() {
   const router = useRouter();
   const run = useSyncExternalStore(subscribeRun, getRunSnapshot, getServerSnapshot);
-  const [tab, setTab] = useState<Tab>("recommendation");
+  // AppNav deep-links /result?tab=roadmap|skillgap. Lazy state init reads the
+  // URL on first render — safe because the tab UI only ever renders client-side
+  // (server HTML is the "Loading your analysis…" branch), so there is no
+  // hydration mismatch, and no setState-in-effect.
+  const [tab, setTab] = useState<Tab>(() => {
+    if (typeof window === "undefined") return "recommendation";
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    return requested && TABS.some((t) => t.id === requested)
+      ? (requested as Tab)
+      : "recommendation";
+  });
   const [copied, setCopied] = useState<"done" | "failed" | null>(null);
 
   // Fresh visit / cleared storage: the analysis lives in Firestore now, so a
@@ -92,11 +108,7 @@ export default function ResultPage() {
 
   return (
     <div className="mx-auto w-full max-w-5xl flex-1 px-6 pb-16">
-      <header className="flex flex-wrap items-center justify-between gap-3 py-6">
-        <Link href="/" className="flex items-center gap-2.5">
-          <Monogram size={30} glow={false} />
-          <span className="text-sm font-semibold tracking-wide">ProjectsForge</span>
-        </Link>
+      <header className="flex flex-wrap items-center justify-end gap-3 py-6">
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -134,7 +146,6 @@ export default function ResultPage() {
           >
             New analysis
           </button>
-          <AccountChip />
         </div>
       </header>
 
@@ -163,7 +174,7 @@ export default function ResultPage() {
             onClick={() => setTab(t.id)}
             className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-semibold transition ${
               tab === t.id
-                ? "bg-accent/15 text-accent shadow-[inset_0_0_0_1px_rgba(52,211,153,0.35)]"
+                ? "bg-accent/15 text-accent shadow-[inset_0_0_0_1px_rgba(96,165,250,0.35)]"
                 : "text-mist hover:text-chalk"
             }`}
           >
@@ -202,6 +213,9 @@ function RecommendationTab({ analysis }: { analysis: Analysis }) {
 
   return (
     <section className="mt-5 space-y-4">
+      {/* Year allotment counters — loud as the caps approach */}
+      <AllotmentBanner />
+
       {/* Next step banner */}
       <div className="flex items-center gap-3 rounded-xl border border-accent/35 bg-accent/10 px-4 py-3 text-sm">
         <span className="font-semibold text-accent">Next step:</span>
@@ -254,6 +268,11 @@ function RecommendationTab({ analysis }: { analysis: Analysis }) {
               ))}
             </ul>
           </div>
+
+          {/* Allotment: claim the primary (unique per student, caps loud) */}
+          <div className="mt-5">
+            <ClaimBox id={primary.id} title={primary.title} />
+          </div>
         </div>
       </article>
 
@@ -292,7 +311,135 @@ function AlternativeCard({ alt }: { alt: Recommendation }) {
         ))}
       </div>
       <p className="mt-3 text-xs leading-relaxed text-mist">{alt.whyMatched}</p>
+      <div className="mt-3">
+        <ClaimBox id={alt.id} title={alt.title} compact />
+      </div>
     </article>
+  );
+}
+
+/* --- Phase 3 allotment UI ---------------------------------------------- */
+
+/**
+ * Claim control for one recommendation: tier chip + state.
+ *   mine   → green confirmation, link to My Projects
+ *   taken  → loud "already allotted to another student" (no button)
+ *   free   → Claim button; 403/409 server copy shows loudly in place,
+ *            cap warnings in amber. The server is the only enforcer.
+ */
+function ClaimBox({
+  id,
+  title,
+  compact = false,
+}: {
+  id: string;
+  title: string;
+  compact?: boolean;
+}) {
+  const claims = useSyncExternalStore(
+    subscribeClaims,
+    getClaimsSnapshot,
+    getClaimsServerSnapshot,
+  );
+  const takenList = useSyncExternalStore(
+    subscribeClaims,
+    getTakenSnapshot,
+    getTakenServerSnapshot,
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+
+  const tier = tierOf(id);
+  const mine = claims.some((entry) => entry.projectId === id);
+  const taken = takenList.includes(id);
+  const tierChip = (
+    <span
+      className={
+        tier === "strong"
+          ? "tag !border-accent/50 !text-accent"
+          : "tag !text-mist"
+      }
+    >
+      {tier === "strong" ? "Strong project · 1/year" : "Normal project"}
+    </span>
+  );
+
+  if (mine) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="tag !border-accent/50 !bg-accent/10 !text-accent">
+          ✓ Allotted to you
+        </span>
+        {tierChip}
+        <Link href="/my-projects" className="text-sky hover:underline">
+          View in My Projects →
+        </Link>
+      </div>
+    );
+  }
+
+  if (taken) {
+    return (
+      <div className="space-y-1.5 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="tag !border-danger/50 !text-danger">
+            Allotted to another student
+          </span>
+          {tierChip}
+        </div>
+        {!compact && (
+          <p className="text-mist">
+            Projects move between students only rarely — pick a different
+            recommendation, or ask the founder to transfer it.
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className={compact ? "btn btn-ghost !px-3 !py-1.5 !text-xs" : "btn btn-accent"}
+          disabled={busy}
+          onClick={() => {
+            void (async () => {
+              setBusy(true);
+              setError(null);
+              setWarning(null);
+              const result = await addClaim({ projectId: id, title });
+              setBusy(false);
+              if (!result.ok) {
+                setError(
+                  result.error ?? "The project couldn't be allotted — try again.",
+                );
+              } else if (result.warning) {
+                setWarning(result.warning);
+              }
+            })();
+          }}
+        >
+          {busy ? "Allotting…" : compact ? "Claim" : "Claim this project"}
+        </button>
+        {tierChip}
+      </div>
+      {error && (
+        <p
+          role="alert"
+          className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {error}
+        </p>
+      )}
+      {warning && (
+        <p className="rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
+          {warning}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -656,6 +803,14 @@ function MarkComplete({ analysis }: { analysis: Analysis }) {
       skillsCovered: analysis.skillGap.needToLearn.map((item) => item.skill),
       weeks: analysis.roadmap.length,
       completedAt: new Date().toISOString(),
+      // Full A→Z story, snapshotted now so the Communication section keeps it
+      // on any device even after the profile or draft changes.
+      summary: projectById(analysis.primary.id)?.summary,
+      why: analysis.primary.whyMatched,
+      difficulty: analysis.primary.difficulty,
+      build: analysis.roadmap.map(
+        (week) => `Week ${week.week} · ${week.focus} — ${week.deliverable}`,
+      ),
     });
     setSaving(false);
     if (!result.ok) {

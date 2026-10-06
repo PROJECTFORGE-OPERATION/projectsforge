@@ -12,9 +12,7 @@ import {
   subscribeAuth,
 } from "@/lib/auth";
 import { FOUNDER_EMAIL } from "@/lib/founder";
-import type { CompletionRecord } from "@/lib/types";
-import { Monogram } from "@/components/logo";
-import { AccountChip } from "@/components/account-chip";
+import type { ClaimRecord, CompletionRecord } from "@/lib/types";
 
 /** Mirrors the FounderStudent shape returned by /api/founder. */
 interface FounderStudent {
@@ -35,6 +33,7 @@ interface FounderStudent {
   introCount: number;
   introText: string | null;
   completions: CompletionRecord[];
+  claims: ClaimRecord[];
 }
 
 function formatDate(iso: string | null): string {
@@ -144,15 +143,8 @@ export default function FounderPage() {
 
   return (
     <div className="mx-auto w-full max-w-5xl flex-1 px-6 pb-16">
-      <header className="flex flex-wrap items-center justify-between gap-3 py-6">
-        <Link href="/" className="flex items-center gap-2.5">
-          <Monogram size={30} glow={false} />
-          <span className="text-sm font-semibold tracking-wide">ProjectsForge</span>
-        </Link>
-        <div className="flex items-center gap-3">
-          <span className="hidden text-xs text-mist sm:inline">Founder dashboard</span>
-          <AccountChip />
-        </div>
+      <header className="flex items-center justify-end py-6">
+        <span className="hidden text-xs text-mist sm:inline">Founder dashboard</span>
       </header>
 
       <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
@@ -265,6 +257,9 @@ function StudentCard({ student }: { student: FounderStudent }) {
       <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line pt-3 text-[0.7rem] text-mist">
         <span>{student.runCount} analyses</span>
         <span>{student.introCount} introductions</span>
+        <span className={student.claims.length > 0 ? "text-accent" : ""}>
+          {student.claims.length} allotted
+        </span>
         <span className={student.completions.length > 0 ? "text-accent" : ""}>
           {student.completions.length} completed
         </span>
@@ -304,6 +299,40 @@ function StudentCard({ student }: { student: FounderStudent }) {
               </div>
             </div>
           )}
+
+          <div>
+            <span className="label">Allotted projects (Phase 3)</span>
+            {student.claims.length === 0 ? (
+              <p className="mt-1.5 text-xs text-mist">No project claimed yet.</p>
+            ) : (
+              <ul className="mt-1.5 space-y-2">
+                {student.claims.map((claim) => (
+                  <li
+                    key={claim.projectId}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-panel-2/40 p-3 text-xs"
+                  >
+                    <span className="font-semibold text-chalk">
+                      {claim.title}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={
+                          claim.tier === "strong"
+                            ? "tag !border-accent/50 !text-accent"
+                            : "tag"
+                        }
+                      >
+                        {claim.tier === "strong" ? "Strong" : "Normal"}
+                      </span>
+                      <span className="text-mist">
+                        {formatDate(claim.claimedAt)}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
 
           <div>
             <span className="label">Completed projects</span>

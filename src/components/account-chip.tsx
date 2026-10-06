@@ -12,8 +12,10 @@ import { FOUNDER_EMAIL } from "@/lib/founder";
 
 /**
  * Header widget: "Sign in" when signed out, first name + sign out when in.
+ * `hideWhenSignedIn` drops the in-state widget for headers that sit under the
+ * authed AppNav (which carries its own chip) — avoids two "Sign out" buttons.
  */
-export function AccountChip() {
+export function AccountChip({ hideWhenSignedIn = false }: { hideWhenSignedIn?: boolean }) {
   const student = useSyncExternalStore(
     subscribeAuth,
     getAuthSnapshot,
@@ -27,6 +29,8 @@ export function AccountChip() {
       </Link>
     );
   }
+
+  if (hideWhenSignedIn) return null;
 
   return (
     <span className="inline-flex items-center gap-2">

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Monogram } from "@/components/logo";
+import { AppNav } from "@/components/app-nav";
 import { CONTACT_EMAIL } from "@/lib/whatsapp";
 import "./globals.css";
 
@@ -41,6 +42,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <AppNav />
         {children}
 
         <footer className="border-t border-line bg-panel/40">
