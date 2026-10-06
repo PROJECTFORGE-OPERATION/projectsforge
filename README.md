@@ -91,7 +91,7 @@ and loud 502/503/504 on failure — never canned data. For a hosted deploy
 
 `analysis` contains `primary`, `alternatives` (2–3), `skillGap`, `roadmap` (exactly `availableWeeks` entries), `nextStep`, `risks`, `assumptions`.
 
-All three student routes authenticate with `Authorization: Bearer <Firebase ID token>`; the server verifies it with the Admin SDK and stores the run under `students/{uid}` (`persisted:false` + a server log entry when the Firestore save fails).
+All three student routes authenticate with `Authorization: Bearer <Firebase ID token>`; the server verifies the token's RS256 signature against Google's public JWKS (`node:crypto` — deliberately not `firebase-admin/auth`, whose `jwks-rsa → jose` ESM chain crashes Vercel lambdas) and stores the run under `students/{uid}` (`persisted:false` + a server log entry when the Firestore save fails).
 
 **Failure modes (deliberately loud — there is no canned fallback):**
 
