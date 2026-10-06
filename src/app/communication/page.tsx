@@ -27,10 +27,9 @@ import {
   subscribeRun,
 } from "@/lib/session";
 import { COMM_TOPICS } from "@/lib/communication";
+import { tierOf } from "@/lib/projects";
 import { ResourceLink } from "@/components/resource-link";
 import { SelfIntroCard } from "@/components/self-intro";
-import { Monogram } from "@/components/logo";
-import { AccountChip } from "@/components/account-chip";
 
 /**
  * Communication Skills — locked until the student marks their first project
@@ -92,15 +91,10 @@ export default function CommunicationPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl flex-1 px-6 pb-16">
-      <header className="flex items-center justify-between py-6">
-        <Link href="/" className="flex items-center gap-2.5">
-          <Monogram size={30} glow={false} />
-          <span className="text-sm font-semibold tracking-wide">ProjectsForge</span>
-        </Link>
-        <div className="flex items-center gap-3">
-          <span className="hidden text-xs text-mist sm:inline">Communication Skills</span>
-          <AccountChip />
-        </div>
+      <header className="flex items-center justify-end py-6">
+        <span className="hidden text-xs text-mist sm:inline">
+          Communication Skills
+        </span>
       </header>
 
       <h1 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">
@@ -183,6 +177,16 @@ export default function CommunicationPage() {
                 const finalWeek = matching
                   ? matching.roadmap[matching.roadmap.length - 1]
                   : undefined;
+                // Prefer the A→Z story snapshotted at completion; the live
+                // draft only backfills older records that predate it.
+                const summary = record.summary;
+                const why = record.why ?? matching?.primary.whyMatched;
+                const build =
+                  record.build ??
+                  matching?.roadmap.map(
+                    (week) => `Week ${week.week} · ${week.focus} — ${week.deliverable}`,
+                  );
+                const tier = tierOf(record.id);
                 return (
                   <article key={record.id} className="card p-4">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -194,6 +198,18 @@ export default function CommunicationPage() {
                       </span>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
+                      <span
+                        className={
+                          tier === "strong"
+                            ? "tag !border-accent/50 !text-accent"
+                            : "tag"
+                        }
+                      >
+                        {tier === "strong" ? "Strong project" : "Normal project"}
+                      </span>
+                      {record.difficulty && (
+                        <span className="tag">{record.difficulty}</span>
+                      )}
                       <span className="tag">{record.weeks} weeks</span>
                       {record.technologies.map((tech) => (
                         <span key={tech} className="tag">
@@ -201,6 +217,16 @@ export default function CommunicationPage() {
                         </span>
                       ))}
                     </div>
+
+                    {summary && (
+                      <p className="mt-3 text-xs leading-relaxed text-mist">
+                        <span className="font-semibold text-chalk">
+                          What it is:{" "}
+                        </span>
+                        {summary}
+                      </p>
+                    )}
+
                     {record.skillsCovered.length > 0 && (
                       <p className="mt-2 text-xs text-mist">
                         Skills covered:{" "}
@@ -209,18 +235,40 @@ export default function CommunicationPage() {
                         </span>
                       </p>
                     )}
-                    {matching && (
-                      <div className="mt-3 space-y-2 border-t border-line pt-3 text-xs leading-relaxed text-mist">
+
+                    {why && (
+                      <div className="mt-3 border-t border-line pt-3 text-xs leading-relaxed text-mist">
                         <p>
-                          <span className="text-chalk">Why you picked it:</span>{" "}
-                          {matching.primary.whyMatched}
+                          <span className="text-chalk">Why you picked it: </span>
+                          {why}
                         </p>
-                        {finalWeek && (
-                          <p>
-                            <span className="text-chalk">Final deliverable:</span>{" "}
+                        {!summary && finalWeek && (
+                          <p className="mt-2">
+                            <span className="text-chalk">
+                              Final deliverable:{" "}
+                            </span>
                             {finalWeek.deliverable}
                           </p>
                         )}
+                      </div>
+                    )}
+
+                    {build && build.length > 0 && (
+                      <div className="mt-3 border-t border-line pt-3">
+                        <span className="text-[0.64rem] font-bold uppercase tracking-[0.16em] text-sky">
+                          How you built it (A → Z)
+                        </span>
+                        <ol className="mt-2 space-y-1">
+                          {build.map((step, index) => (
+                            <li
+                              key={index}
+                              className="flex items-start gap-2 text-xs leading-relaxed text-mist"
+                            >
+                              <span className="text-accent">•</span>
+                              {step}
+                            </li>
+                          ))}
+                        </ol>
                       </div>
                     )}
                   </article>

@@ -63,7 +63,20 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <form onSubmit={submit} className="mt-7 space-y-4">
+          {/* Genuine-details note — shown before the form on every login. */}
+          <p
+            className="mt-5 rounded-xl border border-accent/30 bg-accent/10 px-3.5 py-3 text-xs leading-relaxed"
+            data-testid="genuine-details-note"
+          >
+            <span className="font-semibold text-accent">
+              Please give genuine details.
+            </span>{" "}
+            Your profile decides your project recommendation — and these details
+            are added to your Communication Skills section once you complete a
+            project, so interview answers stay true to you.
+          </p>
+
+          <form onSubmit={submit} className="mt-6 space-y-4">
             {mode === "signup" && (
               <label className="block">
                 <span className="label">Full name</span>

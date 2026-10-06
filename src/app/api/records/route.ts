@@ -85,8 +85,9 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  const action = parsed.data.action;
   try {
-    if (parsed.data.action === "complete") {
+    if (action === "complete") {
       const completions = await addCompletionTx(user, parsed.data.record);
       return Response.json({ completions });
     }
@@ -96,7 +97,10 @@ export async function POST(request: Request): Promise<Response> {
     });
     return Response.json({ completions });
   } catch (cause) {
-    console.error("[api/records] save failed:", cause);
+    // Label with the action: "complete" and "migrate" both write
+    // students/{uid}, and without the action a contention failure is
+    // impossible to attribute to the request that caused it.
+    console.error(`[api/records] ${action} failed:`, cause);
     return Response.json(
       {
         error: "Your record couldn't be saved to the cloud — please try again.",

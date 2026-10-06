@@ -1,9 +1,11 @@
 import { authHeaders } from "./auth";
 import type {
+  ClaimRecord,
   CompletionRecord,
   RecordsResponse,
   StoredIntro,
   StudentProfile,
+  YearCounters,
 } from "./types";
 
 /**
@@ -22,7 +24,7 @@ import type {
  * (migrate) and then cleared — the server never overwrites newer cloud data.
  */
 
-export type { CompletionRecord, StoredIntro };
+export type { ClaimRecord, CompletionRecord, StoredIntro, YearCounters };
 
 type Listener = () => void;
 
@@ -34,9 +36,15 @@ const listeners = new Set<Listener>();
  * allocates a fresh [] on every call while there is no data yet.
  */
 const EMPTY_COMPLETIONS: CompletionRecord[] = [];
+const EMPTY_CLAIMS: ClaimRecord[] = [];
+const EMPTY_TAKEN: string[] = [];
 
 let intro: StoredIntro | null = null;
 let completions: CompletionRecord[] = EMPTY_COMPLETIONS;
+/** Phase 3: this student's allotments, year counters, others' held projects. */
+let claims: ClaimRecord[] = EMPTY_CLAIMS;
+let counters: YearCounters | null = null;
+let taken: string[] = EMPTY_TAKEN;
 /** True once the first load attempt finished (success or loud failure). */
 let resolved = false;
 let loadError: string | null = null;
@@ -81,6 +89,10 @@ function pickCompleted(data: unknown): CompletionRecord[] {
     if (typeof item !== "object" || item === null) return [];
     const record = item as Partial<CompletionRecord>;
     if (typeof record.id !== "string" || typeof record.title !== "string") return [];
+    const asOptStrings = (value: unknown): string[] | undefined =>
+      Array.isArray(value)
+        ? value.filter((entry): entry is string => typeof entry === "string")
+        : undefined;
     return [
       {
         id: record.id,
@@ -89,6 +101,11 @@ function pickCompleted(data: unknown): CompletionRecord[] {
         skillsCovered: asStrings(record.skillsCovered),
         weeks: typeof record.weeks === "number" ? record.weeks : 0,
         completedAt: typeof record.completedAt === "string" ? record.completedAt : "",
+        // Phase-3 story fields — carried through only when actually present.
+        ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
+        ...(typeof record.why === "string" ? { why: record.why } : {}),
+        ...(typeof record.difficulty === "string" ? { difficulty: record.difficulty } : {}),
+        ...(asOptStrings(record.build)?.length ? { build: asOptStrings(record.build) } : {}),
       },
     ];
   });
@@ -177,6 +194,9 @@ async function fetchRecords(): Promise<RecordsResponse | null> {
 
     intro = data.intro ?? null;
     completions = data.completions.length > 0 ? data.completions : EMPTY_COMPLETIONS;
+    claims = Array.isArray(data.claims) && data.claims.length > 0 ? data.claims : EMPTY_CLAIMS;
+    counters = data.counters ?? null;
+    taken = Array.isArray(data.taken) && data.taken.length > 0 ? data.taken : EMPTY_TAKEN;
     resolved = true;
     loadError = null;
     emit();
@@ -325,6 +345,93 @@ export async function addCompletion(
     return { ok: true };
   } catch (cause) {
     console.error("[records] addCompletion failed:", cause);
+    return {
+      ok: false,
+      error: "Could not reach the server — check your connection and try again.",
+    };
+  }
+}
+
+/* --- project allotment (Phase 3) ---------------------------------------- */
+
+export function subscribeClaims(listener: Listener): () => void {
+  return subscribe(listener);
+}
+
+export function getClaimsSnapshot(): ClaimRecord[] {
+  return claims;
+}
+
+/** Server snapshot for useSyncExternalStore — records don't exist during SSR. */
+export function getClaimsServerSnapshot(): ClaimRecord[] {
+  return EMPTY_CLAIMS;
+}
+
+export function getCountersSnapshot(): YearCounters | null {
+  return counters;
+}
+
+export function getCountersServerSnapshot(): null {
+  return null;
+}
+
+export function getTakenSnapshot(): string[] {
+  return taken;
+}
+
+export function getTakenServerSnapshot(): string[] {
+  return EMPTY_TAKEN;
+}
+
+/**
+ * Claim a project (POST /api/claim). Returns plain-word copy on failure so
+ * the button can show it loudly in place — 409 = already allotted to someone
+ * else, 403 = a yearly cap, both verbatim from the server. On success the
+ * store updates with the new claim, counters and any loud cap warning.
+ */
+export async function addClaim(input: {
+  projectId: string;
+  title: string;
+}): Promise<{ ok: boolean; error?: string; warning?: string }> {
+  try {
+    const headers = await authHeaders();
+    if (!headers.authorization) {
+      return {
+        ok: false,
+        error: "Sign in required — sign back in to claim a project.",
+      };
+    }
+    const res = await fetch("/api/claim", {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const data = (await res.json().catch(() => null)) as
+      | {
+          ok?: boolean;
+          claims?: ClaimRecord[];
+          counters?: YearCounters;
+          warning?: string;
+          error?: string;
+        }
+      | null;
+    if (!res.ok || !data?.ok) {
+      return {
+        ok: false,
+        error:
+          (data && typeof data.error === "string" && data.error) ||
+          `The server returned ${res.status} without allotting the project.`,
+      };
+    }
+    if (Array.isArray(data.claims) && data.claims.length > 0) claims = data.claims;
+    if (data.counters) counters = data.counters;
+    // Ours now — drop it from the "held by others" list.
+    taken = taken.filter((id) => id !== input.projectId);
+    emit();
+    return { ok: true, warning: data.warning };
+  } catch (cause) {
+    console.error("[records] addClaim failed:", cause);
     return {
       ok: false,
       error: "Could not reach the server — check your connection and try again.",

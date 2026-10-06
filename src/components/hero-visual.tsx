@@ -25,7 +25,7 @@ export function HeroVisual({ className = "" }: { className?: string }) {
   return (
     <div className={`relative ${className}`} aria-hidden="true">
       {/* brand glow behind the card */}
-      <div className="pointer-events-none absolute -inset-4 rounded-[2.5rem] bg-[radial-gradient(60%_55%_at_55%_35%,rgba(52,211,153,0.18),transparent_70%)] blur-2xl" />
+      <div className="pointer-events-none absolute -inset-4 rounded-[2.5rem] bg-[radial-gradient(60%_55%_at_55%_35%,rgba(96,165,250,0.18),transparent_70%)] blur-2xl" />
 
       <div className="card relative p-5">
         <div className="flex items-center justify-between">

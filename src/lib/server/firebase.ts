@@ -3,10 +3,17 @@ import { cert, getApps, initializeApp, type App, type ServiceAccount } from "fir
 import { FieldValue, getFirestore, type Firestore } from "firebase-admin/firestore";
 import type {
   AnalyzeResponse,
+  ClaimRecord,
   CompletionRecord,
   RecordsResponse,
   StoredIntro,
+  YearCounters,
 } from "@/lib/types";
+import {
+  MAX_PROJECTS_PER_YEAR,
+  MAX_STRONG_PER_YEAR,
+} from "@/lib/types";
+import { tierOf } from "@/lib/projects";
 
 /**
  * Phase 2 backbone: Firestore through the Admin SDK.
@@ -337,21 +344,104 @@ function asComplections(value: unknown): CompletionRecord[] {
   return Array.isArray(value) ? (value as CompletionRecord[]) : [];
 }
 
+function asClaims(value: unknown): ClaimRecord[] {
+  return Array.isArray(value) ? (value as ClaimRecord[]) : [];
+}
+
+/** ISO timestamp (or anything unparseable → 0) → calendar year. */
+function yearOfIso(value: string): number {
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? 0 : new Date(time).getFullYear();
+}
+
+/**
+ * Phase-3 counters for one calendar year: distinct projects the student is
+ * engaged with this year (claimed OR completed — one id counts once), plus
+ * how many of them are strong-tier.
+ */
+function computeCounters(
+  claims: ClaimRecord[],
+  completions: CompletionRecord[],
+  year: number,
+): YearCounters {
+  const ids = new Set<string>();
+  const strong = new Set<string>();
+  for (const claim of claims) {
+    if (yearOfIso(claim.claimedAt) !== year) continue;
+    ids.add(claim.projectId);
+    if (claim.tier === "strong") strong.add(claim.projectId);
+  }
+  for (const record of completions) {
+    if (yearOfIso(record.completedAt) !== year) continue;
+    ids.add(record.id);
+    if (tierOf(record.id) === "strong") strong.add(record.id);
+  }
+  return {
+    year,
+    yearUsed: ids.size,
+    yearMax: MAX_PROJECTS_PER_YEAR,
+    strongUsed: strong.size,
+    strongMax: MAX_STRONG_PER_YEAR,
+  };
+}
+
+/** Loud, plain-word copy shown the moment a student nears a cap. */
+function capWarning(counters: YearCounters): string | undefined {
+  if (counters.yearUsed >= counters.yearMax) {
+    return `Yearly limit reached: ${counters.yearUsed}/${counters.yearMax} projects in ${counters.year}. No new allotments until next year — finish and document what you have.`;
+  }
+  if (counters.yearUsed >= counters.yearMax - 1) {
+    return `Last slot: ${counters.yearUsed}/${counters.yearMax} projects in ${counters.year} — one more claim and you are at the yearly limit.`;
+  }
+  return undefined;
+}
+
+function claimsCollection() {
+  return db().collection("claims");
+}
+
 /**
  * Idempotent: the same project id is recorded once, newest first — inside a
  * transaction so two tabs marking complete can't double-write.
+ *
+ * A completed project is by definition the student's own work, so the claim
+ * mirror is upserted too (Phase 3) — but never taken away from another
+ * student's existing allotment.
  */
 export async function addCompletionTx(
   user: ServerUser,
   record: CompletionRecord,
 ): Promise<CompletionRecord[]> {
   const ref = studentDoc(user.uid);
+  const claimRef = claimsCollection().doc(record.id);
   return db().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
+    const [snap, claimSnap] = await Promise.all([tx.get(ref), tx.get(claimRef)]);
     const current = asComplections(snap.data()?.completions);
     const merged = current.some((entry) => entry.id === record.id)
       ? current
       : [record, ...current];
+
+    // Allotment mirror — register the completed project when unclaimed or
+    // already ours; a claim held by someone else is left untouched.
+    const claims = asClaims(snap.data()?.claims);
+    const heldByOther =
+      claimSnap.exists && claimSnap.data()?.claimedBy !== user.uid;
+    if (!heldByOther && !claims.some((entry) => entry.projectId === record.id)) {
+      const claim: ClaimRecord = {
+        projectId: record.id,
+        title: record.title,
+        tier: tierOf(record.id),
+        claimedAt: new Date().toISOString(),
+      };
+      tx.set(claimRef, {
+        ...claim,
+        claimedBy: user.uid,
+        claimedByEmail: user.email,
+        claimedByName: user.displayName ?? "",
+      });
+      claims.unshift(claim);
+    }
+
     tx.set(
       ref,
       {
@@ -359,6 +449,7 @@ export async function addCompletionTx(
         email: user.email,
         joinedAt: joinedAt(user),
         completions: merged,
+        claims,
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
@@ -377,38 +468,204 @@ export async function migrateRecords(
   incoming: { completions: CompletionRecord[]; intro?: StoredIntro | null },
 ): Promise<CompletionRecord[]> {
   const ref = studentDoc(user.uid);
-  return db().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    const data = snap.data() ?? {};
-    const current = asComplections(data.completions);
-    const known = new Set(current.map((entry) => entry.id));
-    const merged = [
-      ...current,
-      ...incoming.completions.filter((record) => !known.has(record.id)),
-    ];
-    const patch: Record<string, unknown> = {
-      ...(user.displayName ? { name: user.displayName } : {}),
-      email: user.email,
-      joinedAt: joinedAt(user),
-      completions: merged,
-      updatedAt: FieldValue.serverTimestamp(),
-    };
-    if (incoming.intro && !data.intro) patch.intro = incoming.intro;
-    tx.set(ref, patch, { merge: true });
-    return merged;
-  });
+  const merge = () =>
+    db().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const data = snap.data() ?? {};
+      const current = asComplections(data.completions);
+      const known = new Set(current.map((entry) => entry.id));
+      const merged = [
+        ...current,
+        ...incoming.completions.filter((record) => !known.has(record.id)),
+      ];
+      const patch: Record<string, unknown> = {
+        ...(user.displayName ? { name: user.displayName } : {}),
+        email: user.email,
+        joinedAt: joinedAt(user),
+        completions: merged,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      if (incoming.intro && !data.intro) patch.intro = incoming.intro;
+      tx.set(ref, patch, { merge: true });
+      return merged;
+    });
+
+  // Firestore's built-in transaction retries are bounded, and a sibling write
+  // landing on students/{uid} at the same moment (a second tab, a completion
+  // committed concurrently) can exhaust them — observed as ABORTED (code 10).
+  // This merge is idempotent, so re-running is safe: a few quiet backoffs,
+  // then the failure surfaces loudly to the route, and the browser keeps its
+  // legacy keys so the import is retried on the next visit anyway.
+  let lastCause: unknown = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await merge();
+    } catch (cause) {
+      if ((cause as { code?: number } | null)?.code !== 10) throw cause;
+      lastCause = cause;
+      console.warn(
+        `[firestore] migrate hit contention (attempt ${attempt}/3) — retrying`,
+      );
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+      }
+    }
+  }
+  throw lastCause;
 }
 
 /** Read one student's cloud state (the payload behind GET /api/records). */
 export async function readRecords(user: ServerUser): Promise<RecordsResponse> {
   const snap = await studentDoc(user.uid).get();
   const data = snap.exists ? (snap.data() ?? {}) : {};
+  const claims = asClaims(data.claims);
+  const completions = asComplections(data.completions);
+  const run = (data.latestRun as RecordsResponse["run"]) ?? null;
+
+  // Which of this student's current recommendations do OTHER students hold?
+  // One batched read; a failure here fails the whole payload loudly rather
+  // than silently showing an "available" project that is already taken.
+  const runIds = run
+    ? [
+        run.analysis.primary.id,
+        ...run.analysis.alternatives.map((alt) => alt.id),
+      ].filter(Boolean)
+    : [];
+  let taken: string[] = [];
+  if (runIds.length > 0) {
+    const refs = runIds.map((id) => claimsCollection().doc(id));
+    const docs = await db().getAll(...refs);
+    taken = docs
+      .filter((doc) => doc.exists && doc.data()?.claimedBy !== user.uid)
+      .map((doc) => doc.id);
+  }
+
+  const year = new Date().getFullYear();
   return {
     profile: (data.profile as RecordsResponse["profile"]) ?? null,
     intro: (data.intro as StoredIntro | null) ?? null,
-    completions: asComplections(data.completions),
-    run: (data.latestRun as RecordsResponse["run"]) ?? null,
+    completions,
+    run,
     runCount: typeof data.runCount === "number" ? data.runCount : 0,
     introCount: typeof data.introCount === "number" ? data.introCount : 0,
+    claims,
+    counters: computeCounters(claims, completions, year),
+    taken,
   };
+}
+
+/* --- project allotment (Phase 3) ---------------------------------------- */
+
+export type ClaimResult =
+  | { ok: true; claims: ClaimRecord[]; counters: YearCounters; warning?: string }
+  | { ok: false; status: number; error: string };
+
+/**
+ * Allot a project to exactly one student (Phase 3).
+ *
+ * Runs one transaction over `claims/{projectId}` (the uniqueness record — doc
+ * id IS the project id, so two students can never hold the same project) and
+ * `students/{uid}` (the per-student mirror + counters). Caps are enforced
+ * here, server-side, never in the UI:
+ *
+ *   1. unique claim       → 409 loud when another student already holds it
+ *   2. ≤7 projects/year   → 403 loud at the cap (both caps re-checked only for
+ *   3. ≤1 strong/year       NEW allotments — a re-claim of your own is
+ *                            idempotent and never re-blocked)
+ *
+ * Success carries a loud warning when the student lands on the last slot or
+ * the cap itself — surfaced verbatim by the UI (zero-fallback copy).
+ */
+export async function claimProject(
+  user: ServerUser,
+  input: { projectId: string; title: string },
+): Promise<ClaimResult> {
+  const { projectId, title } = input;
+  const now = new Date();
+  const year = now.getFullYear();
+  const claimRef = claimsCollection().doc(projectId);
+  const studRef = studentDoc(user.uid);
+
+  return db().runTransaction(async (tx): Promise<ClaimResult> => {
+    const [claimSnap, studSnap] = await Promise.all([
+      tx.get(claimRef),
+      tx.get(studRef),
+    ]);
+    const data = studSnap.data() ?? {};
+    const claims = asClaims(data.claims);
+    const completions = asComplections(data.completions);
+    const existing = claimSnap.exists ? (claimSnap.data() ?? null) : null;
+
+    const patchBase = {
+      ...(user.displayName ? { name: user.displayName } : {}),
+      email: user.email,
+      joinedAt: joinedAt(user),
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+
+    // 1. Unique allotment — loud refusal when someone else already holds it.
+    if (existing && existing.claimedBy !== user.uid) {
+      return {
+        ok: false,
+        status: 409,
+        error: `“${title}” is already allotted to another student. Projects move between students only rarely — pick a different recommendation, or ask the founder to transfer it if it is truly yours.`,
+      };
+    }
+
+    const tier = tierOf(projectId);
+    const mine = claims.some((entry) => entry.projectId === projectId);
+
+    // Owner re-claim: repair the global record if the mirror already has it,
+    // without re-running the caps (an allotment can never be un-had).
+    if (mine) {
+      if (!claimSnap.exists) {
+        const record = claims.find((entry) => entry.projectId === projectId)!;
+        tx.set(claimRef, {
+          ...record,
+          claimedBy: user.uid,
+          claimedByEmail: user.email,
+          claimedByName: user.displayName ?? "",
+        });
+      }
+      const counters = computeCounters(claims, completions, year);
+      return { ok: true, claims, counters, warning: capWarning(counters) };
+    }
+
+    // 2. Yearly project cap.
+    const before = computeCounters(claims, completions, year);
+    if (before.yearUsed >= before.yearMax) {
+      return {
+        ok: false,
+        status: 403,
+        error: `You have reached the limit of ${before.yearMax} projects for ${year} (${before.yearUsed}/${before.yearMax} used). New allotments open again in ${year + 1} — finish and document what you already have.`,
+      };
+    }
+
+    // 3. One strong project per year.
+    if (tier === "strong" && before.strongUsed >= before.strongMax) {
+      return {
+        ok: false,
+        status: 403,
+        error: `Your one strong project for ${year} is already allotted (${before.strongUsed}/${before.strongMax}). Strong projects are capped at one per year — claim a normal project instead, or wait for ${year + 1}.`,
+      };
+    }
+
+    const record: ClaimRecord = {
+      projectId,
+      title,
+      tier,
+      claimedAt: now.toISOString(),
+    };
+    tx.set(claimRef, {
+      ...record,
+      claimedBy: user.uid,
+      claimedByEmail: user.email,
+      claimedByName: user.displayName ?? "",
+    });
+    const merged = [record, ...claims];
+    tx.set(studRef, { ...patchBase, claims: merged }, { merge: true });
+
+    const after = computeCounters(merged, completions, year);
+    return { ok: true, claims: merged, counters: after, warning: capWarning(after) };
+  });
 }

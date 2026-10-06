@@ -30,8 +30,6 @@ import {
   getIdToken,
   subscribeAuth,
 } from "@/lib/auth";
-import { Monogram } from "@/components/logo";
-import { AccountChip } from "@/components/account-chip";
 
 type FieldErrors = Partial<
   Record<"branch" | "year" | "interests" | "careerGoal", string>
@@ -248,23 +246,11 @@ export default function ProfilePage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl flex-1 px-6 pb-16">
-      <header className="flex items-center justify-between py-6">
-        <Link href="/" className="flex items-center gap-2.5">
-          <Monogram size={30} glow={false} />
-          <span className="text-sm font-semibold tracking-wide">ProjectsForge</span>
-        </Link>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-mist">Step 1 of 2 · Student Profile</span>
-          <AccountChip />
-        </div>
+      <header className="flex justify-end py-6">
+        <span className="text-xs text-mist">Step 1 of 2 · Student Profile</span>
       </header>
 
-      {/* Greeting — first thing a student sees after login, before the form. */}
-      <p className="mt-4 text-sm font-semibold text-accent">
-        Welcome, {student.name}
-      </p>
-
-      <form id="profile-form" onSubmit={handleSubmit} className="mt-1.5">
+      <form id="profile-form" onSubmit={handleSubmit} className="mt-2">
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
           Tell us about yourself
         </h1>

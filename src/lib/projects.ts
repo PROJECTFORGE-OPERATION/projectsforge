@@ -10,6 +10,8 @@ import { yearNumber } from "./types";
  */
 export interface ProjectRecord {
   id: string;
+  /** Allotment tier — see ProjectTier in types.ts (normal | strong). */
+  tier: "normal" | "strong";
   title: string;
   summary: string;
   difficulty: "Beginner" | "Intermediate" | "Advanced";
@@ -29,6 +31,7 @@ export interface ProjectRecord {
 export const PROJECTS: ProjectRecord[] = [
   {
     id: "soil-irrigation",
+    tier: "strong",
     title: "Smart Irrigation System",
     summary:
       "Soil-moisture driven water pump controller that logs data and waters plants only when needed.",
@@ -43,6 +46,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "air-quality-monitor",
+    tier: "normal",
     title: "Air Quality Monitoring Dashboard",
     summary:
       "ESP32 sensor node uploads AQ readings to a live dashboard with trends and alert thresholds.",
@@ -57,6 +61,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "finance-tracker",
+    tier: "normal",
     title: "Personal Finance Tracker",
     summary:
       "Track income and expenses, categorise spending and show monthly savings insights with charts.",
@@ -71,6 +76,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "resume-matcher",
+    tier: "strong",
     title: "Resume–Skill Gap Matcher",
     summary:
       "Upload a resume and a job description; get a matched-skills report and missing-skill list.",
@@ -85,6 +91,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "hostel-complaints",
+    tier: "normal",
     title: "Hostel Complaint Management",
     summary:
       "Students file complaints, wardens assign them, and everyone tracks status until resolution.",
@@ -99,6 +106,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "traffic-signal-cv",
+    tier: "strong",
     title: "Adaptive Traffic Signal with Computer Vision",
     summary:
       "Camera counts vehicles per lane and adjusts green-light duration to reduce waiting time.",
@@ -113,6 +121,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "solar-output-predictor",
+    tier: "strong",
     title: "Solar Panel Output Predictor",
     summary:
       "Predict hourly solar energy output from weather data and visualise generation patterns.",
@@ -127,6 +136,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "code-review-bot",
+    tier: "strong",
     title: "Automated Code Review Bot",
     summary:
       "Pull-request bot that comments on style issues, bugs and missing tests using rule checks + LLM.",
@@ -141,6 +151,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "event-pwa",
+    tier: "normal",
     title: "College Event Management PWA",
     summary:
       "Discover events, register with QR codes and get reminders — installable as an offline PWA.",
@@ -155,6 +166,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "fan-speed-controller",
+    tier: "normal",
     title: "Energy-Aware Fan Speed Controller",
     summary:
       "Temperature + presence sensing that varies fan speed to cut power draw, with live energy stats.",
@@ -169,6 +181,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "face-attendance",
+    tier: "strong",
     title: "Face Recognition Attendance System",
     summary:
       "Mark attendance by face, store records with timestamps and flag proxies automatically.",
@@ -183,6 +196,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "bridge-load-monitor",
+    tier: "strong",
     title: "Bridge Load & Vibration Monitor",
     summary:
       "Strain/load sensors stream structural stress data to a dashboard that flags unsafe spikes.",
@@ -197,6 +211,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "notes-ocr",
+    tier: "normal",
     title: "Handwritten Notes to Text Scanner",
     summary:
       "Scan handwritten or printed notes and convert them into searchable, editable text.",
@@ -211,6 +226,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "vuln-scanner",
+    tier: "strong",
     title: "Lightweight Web Vulnerability Scanner",
     summary:
       "Crawl a target site and report common OWASP issues like XSS and SQL injection with proofs.",
@@ -225,6 +241,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "lan-party-game",
+    tier: "strong",
     title: "2D Multiplayer Browser Game",
     summary:
       "Real-time 2D game over WebSockets with rooms, scoring and a simple leaderboard.",
@@ -239,6 +256,7 @@ export const PROJECTS: ProjectRecord[] = [
   },
   {
     id: "student-dashboard-ui",
+    tier: "normal",
     title: "Student Performance Dashboard (UI Case Study)",
     summary:
       "Design and build a dashboard that turns attendance and marks data into clear, actionable views.",
@@ -252,6 +270,20 @@ export const PROJECTS: ProjectRecord[] = [
     careerFit: ["Placement / Job", "Higher Studies"],
   },
 ];
+
+/** Catalog lookup by id — the single source of a project's tier. */
+export function projectById(id: string): ProjectRecord | undefined {
+  return PROJECTS.find((entry) => entry.id === id);
+}
+
+/**
+ * Tier for any recommendation/completion id. Unknown ids (an old record or a
+ * model typo) resolve to "normal" — the cap-safe default: never lets an
+ * unverified id burn the student's one strong slot.
+ */
+export function tierOf(id: string): "normal" | "strong" {
+  return projectById(id)?.tier ?? "normal";
+}
 
 /**
  * Deterministic candidate ranking: the dataset is scored against the profile

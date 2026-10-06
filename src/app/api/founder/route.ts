@@ -5,7 +5,12 @@ import {
   requireUser,
   type ServerUser,
 } from "@/lib/server/firebase";
-import type { CompletionRecord, ErrorResponse, StoredIntro } from "@/lib/types";
+import type {
+  ClaimRecord,
+  CompletionRecord,
+  ErrorResponse,
+  StoredIntro,
+} from "@/lib/types";
 
 export const runtime = "nodejs";
 /** Vercel function cap — one collection read fits well inside 30s. */
@@ -30,6 +35,8 @@ export interface FounderStudent {
   introCount: number;
   introText: string | null;
   completions: CompletionRecord[];
+  /** Phase 3: this student's project allotments. */
+  claims: ClaimRecord[];
 }
 
 /** Firestore Timestamp | ISO string | missing → ISO string | null. */
@@ -61,6 +68,9 @@ function toStudent(uid: string, data: Record<string, unknown>): FounderStudent {
   const completions = Array.isArray(data.completions)
     ? (data.completions as CompletionRecord[])
     : [];
+  const claims = Array.isArray(data.claims)
+    ? (data.claims as ClaimRecord[])
+    : [];
 
   return {
     uid,
@@ -85,6 +95,7 @@ function toStudent(uid: string, data: Record<string, unknown>): FounderStudent {
     introCount: typeof data.introCount === "number" ? data.introCount : 0,
     introText: intro?.text ?? null,
     completions,
+    claims,
   };
 }
 

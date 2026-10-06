@@ -37,7 +37,7 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-3">
           <EngineStatus />
-          <AccountChip />
+          <AccountChip hideWhenSignedIn />
         </div>
       </header>
 
