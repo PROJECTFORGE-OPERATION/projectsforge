@@ -250,7 +250,26 @@ export default function ProfilePage() {
         <span className="text-xs text-mist">Step 1 of 2 · Student Profile</span>
       </header>
 
-      <form id="profile-form" onSubmit={handleSubmit} className="mt-2">
+      {/* The promise, front and centre the moment a student signs in. */}
+      <figure className="mt-1 rounded-2xl border border-accent/40 bg-gradient-to-br from-accent/15 via-accent/[0.06] to-transparent p-5 shadow-[0_0_28px_rgba(96,165,250,0.15)]">
+        <blockquote className="text-lg font-semibold leading-snug text-chalk sm:text-xl">
+          <span aria-hidden="true" className="text-accent">
+            “
+          </span>
+          Don’t just build projects.{" "}
+          <span className="bg-gradient-to-r from-accent to-sky bg-clip-text text-transparent">
+            Build the skills, proof, and confidence that build your career.
+          </span>
+          <span aria-hidden="true" className="text-accent">
+            ”
+          </span>
+        </blockquote>
+        <figcaption className="mt-2.5 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-mist">
+          Why every project here matters
+        </figcaption>
+      </figure>
+
+      <form id="profile-form" onSubmit={handleSubmit} className="mt-6">
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
           Tell us about yourself
         </h1>
