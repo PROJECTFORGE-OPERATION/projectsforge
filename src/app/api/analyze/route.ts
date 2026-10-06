@@ -1,6 +1,7 @@
 import { selectCandidates } from "@/lib/projects";
 import { ACTIVE_MODEL, PROVIDER, AiError, chatStructured } from "@/lib/ollama";
 import { buildMessages, makeValidator } from "@/lib/prompt";
+import { apiErrorResponse, requireUser, saveLatestRun, type ServerUser } from "@/lib/server/firebase";
 import {
   makeAnalysisSchema,
   profileSchema,
@@ -45,6 +46,20 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const profile = parsed.data;
+
+  // Identity before any AI budget: /profile is gated, so a real student is
+  // always signed in. Validation above runs first so a bad body still fails
+  // with its precise 400 (edge suite) before auth is even considered.
+  let user: ServerUser;
+  try {
+    user = await requireUser(request);
+  } catch (cause) {
+    const mapped = apiErrorResponse(cause);
+    if (mapped) return mapped;
+    console.error("[api/analyze] unexpected auth failure:", cause);
+    return errorResponse(500, { error: "Unexpected server error while checking your session." });
+  }
+
   const candidates = selectCandidates(profile);
   const startedAt = Date.now();
 
@@ -62,7 +77,17 @@ export async function POST(request: Request): Promise<Response> {
       provider: PROVIDER,
       candidateCount: candidates.length,
       elapsedMs: Date.now() - startedAt,
+      persisted: false,
     };
+    // Phase 2 backbone: the run lands in Firestore under the student's uid.
+    // A save failure never hides the analysis (it already cost an AI round
+    // trip) — it is logged loudly and leaves persisted:false in the payload.
+    try {
+      await saveLatestRun(user, response);
+      response.persisted = true;
+    } catch (cause) {
+      console.error("[api/analyze] Firestore save failed:", cause);
+    }
     return Response.json(response);
   } catch (cause) {
     if (cause instanceof AiError) {

@@ -157,6 +157,11 @@ export interface AnalyzeResponse {
   provider?: "ollama" | "gemini";
   candidateCount: number;
   elapsedMs: number;
+  /**
+   * Phase 2: false when the analysis rendered but the Firestore save failed
+   * (the failure is also logged server-side — never silent).
+   */
+  persisted?: boolean;
 }
 
 /** What the API returns on failure. */
@@ -178,5 +183,65 @@ export type Introduction = z.infer<typeof introductionSchema>;
 export const introRequestSchema = z.object({
   name: z.string().trim().min(2).max(80),
   profile: profileSchema,
+  /**
+   * Client-computed profile fingerprint (records.ts introSignature) — stored
+   * alongside the text so a profile edit can tell the intro is stale.
+   */
+  signature: z.string().min(1).max(16000),
 });
 export type IntroRequest = z.infer<typeof introRequestSchema>;
+
+/* --- portfolio records (Phase 2: Firestore-backed) ---------------------- */
+
+/** Profile fingerprint the intro text was generated from — mismatch = stale. */
+export interface StoredIntro {
+  text: string;
+  signature: string;
+  generatedAt: string;
+}
+
+/** Interview-ready record of a project the student marked complete. */
+export interface CompletionRecord {
+  id: string;
+  title: string;
+  technologies: string[];
+  skillsCovered: string[];
+  weeks: number;
+  completedAt: string;
+}
+
+export const storedIntroSchema = z.object({
+  text: z.string().min(1).max(8000),
+  signature: z.string().min(1).max(16000),
+  generatedAt: z.string().max(60),
+});
+
+export const completionRecordSchema = z.object({
+  id: z.string().min(1).max(200),
+  title: z.string().min(1).max(300),
+  technologies: z.array(z.string().max(120)).max(40),
+  skillsCovered: z.array(z.string().max(120)).max(80),
+  weeks: z.number().int().min(0).max(520),
+  completedAt: z.string().max(60),
+});
+
+/** Request body for POST /api/records. */
+export const recordsRequestSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("complete"), record: completionRecordSchema }),
+  z.object({
+    action: z.literal("migrate"),
+    completions: z.array(completionRecordSchema).max(200),
+    intro: storedIntroSchema.nullable().optional(),
+  }),
+]);
+export type RecordsRequest = z.infer<typeof recordsRequestSchema>;
+
+/** What GET /api/records returns — one round trip for every records view. */
+export interface RecordsResponse {
+  profile: StudentProfile | null;
+  intro: StoredIntro | null;
+  completions: CompletionRecord[];
+  run: AnalyzeResponse | null;
+  runCount: number;
+  introCount: number;
+}

@@ -7,6 +7,8 @@ import {
   clearRun,
   getRunSnapshot,
   getServerSnapshot,
+  saveDraft,
+  saveRun,
   subscribeRun,
   type StoredRun,
 } from "@/lib/session";
@@ -27,6 +29,9 @@ import {
   addCompletion,
   getCompletedServerSnapshot,
   getCompletedSnapshot,
+  getServerResolvedSnapshot,
+  loadRecords,
+  recordsResolved,
   subscribeCompleted,
 } from "@/lib/records";
 
@@ -51,12 +56,28 @@ export default function ResultPage() {
   const [tab, setTab] = useState<Tab>("recommendation");
   const [copied, setCopied] = useState<"done" | "failed" | null>(null);
 
-  // No stored analysis (fresh visit / cleared) -> back to the form.
-  // Reads the store directly instead of `run`: during hydration the hook still
-  // returns the server snapshot (null) when effects fire, which would falsely
-  // redirect even though sessionStorage has the analysis.
+  // Fresh visit / cleared storage: the analysis lives in Firestore now, so a
+  // fresh device first asks the cloud for the latest run — only when that
+  // comes back empty too do we go back to the form. Reads the stores directly
+  // instead of `run`: during hydration the hook still returns the server
+  // snapshot (null) when effects fire, which would otherwise falsify both
+  // the local check and the redirect.
   useEffect(() => {
-    if (getRunSnapshot() === null) router.replace("/profile");
+    let cancelled = false;
+    const hadLocal = getRunSnapshot() !== null;
+    void loadRecords().then((state) => {
+      if (cancelled) return;
+      if (hadLocal) return;
+      if (state?.run) {
+        saveRun(state.run);
+        saveDraft(state.run);
+      } else if (getRunSnapshot() === null) {
+        router.replace("/profile");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (!run) {
@@ -616,7 +637,42 @@ function MarkComplete({ analysis }: { analysis: Analysis }) {
     getCompletedSnapshot,
     getCompletedServerSnapshot,
   );
+  const recordsReady = useSyncExternalStore(
+    subscribeCompleted,
+    recordsResolved,
+    getServerResolvedSnapshot,
+  );
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const record = completed.find((entry) => entry.id === analysis.primary.id);
+
+  async function markComplete(): Promise<void> {
+    setSaving(true);
+    setSaveError(null);
+    const result = await addCompletion({
+      id: analysis.primary.id,
+      title: analysis.primary.title,
+      technologies: analysis.primary.technologies,
+      skillsCovered: analysis.skillGap.needToLearn.map((item) => item.skill),
+      weeks: analysis.roadmap.length,
+      completedAt: new Date().toISOString(),
+    });
+    setSaving(false);
+    if (!result.ok) {
+      setSaveError(
+        result.error ?? "Your record couldn't be saved — please try again.",
+      );
+    }
+  }
+
+  // Never flash "Mark project complete" while the cloud record list loads.
+  if (!recordsReady) {
+    return (
+      <div className="card p-5 text-sm text-mist">
+        Loading your project records…
+      </div>
+    );
+  }
 
   if (record) {
     return (
@@ -645,21 +701,23 @@ function MarkComplete({ analysis }: { analysis: Analysis }) {
         covered — and unlock the Communication Skills section for interview
         prep.
       </p>
+      {saveError && (
+        <p
+          role="alert"
+          className="mt-3 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
+          {saveError}
+        </p>
+      )}
       <button
         type="button"
         className="btn btn-accent mt-4"
-        onClick={() =>
-          addCompletion({
-            id: analysis.primary.id,
-            title: analysis.primary.title,
-            technologies: analysis.primary.technologies,
-            skillsCovered: analysis.skillGap.needToLearn.map((item) => item.skill),
-            weeks: analysis.roadmap.length,
-            completedAt: new Date().toISOString(),
-          })
-        }
+        disabled={saving}
+        onClick={() => {
+          void markComplete();
+        }}
       >
-        Mark project complete
+        {saving ? "Saving…" : "Mark project complete"}
       </button>
     </div>
   );
