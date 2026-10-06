@@ -259,7 +259,12 @@ export default function ProfilePage() {
         </div>
       </header>
 
-      <form id="profile-form" onSubmit={handleSubmit} className="mt-4">
+      {/* Greeting — first thing a student sees after login, before the form. */}
+      <p className="mt-4 text-sm font-semibold text-accent">
+        Welcome, {student.name}
+      </p>
+
+      <form id="profile-form" onSubmit={handleSubmit} className="mt-1.5">
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
           Tell us about yourself
         </h1>
