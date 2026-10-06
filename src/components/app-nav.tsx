@@ -12,9 +12,10 @@ import { Monogram } from "@/components/logo";
 import { AccountChip } from "@/components/account-chip";
 
 /**
- * The signed-in top bar: "Welcome, {name}" plus Home / My Projects / Roadmap
- * / Skill Gap. Rendered from the root layout so every authed page shares it;
- * returns null while signed out so landing/login/footer stay untouched.
+ * The signed-in top bar: time-aware greeting plus Home / My Projects /
+ * Roadmap / Skill Gap. Rendered from the root layout so every authed page
+ * shares it; returns null while signed out so landing/login/footer stay
+ * untouched.
  *
  * Roadmap and Skill Gap deep-link into the analysis tabs on /result — that
  * page reads ?tab= on mount (window.location, no useSearchParams/Suspense).
@@ -25,6 +26,18 @@ const NAV_ITEMS: Array<{ href: string; label: string }> = [
   { href: "/result?tab=roadmap", label: "Roadmap" },
   { href: "/result?tab=skillgap", label: "Skill Gap" },
 ];
+
+/**
+ * "Good morning" 05:00–11:59 · "Good afternoon" 12:00–16:59 ·
+ * "Good evening" the rest (17:00–04:59, including the small hours).
+ * Client-side by design: the bar only renders once signed in, so there is
+ * no server HTML for this string to disagree with on hydration.
+ */
+export function greetingFor(hour: number): string {
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 17) return "Good afternoon";
+  return "Good evening";
+}
 
 export function AppNav() {
   const student = useSyncExternalStore(
@@ -53,7 +66,7 @@ export function AppNav() {
         </Link>
 
         <span className="text-sm text-mist">
-          Welcome,{" "}
+          {greetingFor(new Date().getHours())},{" "}
           <span className="font-semibold text-chalk">{student.name}</span>
         </span>
 
