@@ -13,6 +13,10 @@ import {
 import {
   getCompletedServerSnapshot,
   getCompletedSnapshot,
+  getRecordsErrorSnapshot,
+  getServerRecordsErrorSnapshot,
+  loadRecords,
+  recordsResolved,
   subscribeCompleted,
 } from "@/lib/records";
 import {
@@ -51,8 +55,24 @@ export default function CommunicationPage() {
     getCompletedSnapshot,
     getCompletedServerSnapshot,
   );
+  const recordsReady = useSyncExternalStore(
+    subscribeCompleted,
+    recordsResolved,
+    getServerResolvedSnapshot,
+  );
+  const recordsError = useSyncExternalStore(
+    subscribeCompleted,
+    getRecordsErrorSnapshot,
+    getServerRecordsErrorSnapshot,
+  );
   const draft = useSyncExternalStore(subscribeDraft, getDraftSnapshot, getServerSnapshot);
   const run = useSyncExternalStore(subscribeRun, getRunSnapshot, getServerSnapshot);
+
+  // The unlock state lives in Firestore now — refresh it on every visit
+  // (loadRecords dedupes concurrent callers, refetches across navigations).
+  useEffect(() => {
+    void loadRecords();
+  }, []);
 
   // Same gate as /profile: signed-out visitors are sent to login — but only
   // after Firebase has resolved its first state (hydration-safe).
@@ -60,7 +80,6 @@ export default function CommunicationPage() {
     if (authReady && getAuthSnapshot() === null && student === null)
       router.replace("/login");
   }, [authReady, student, router]);
-
   if (!student) {
     return (
       <div className="mx-auto w-full max-w-3xl flex-1 px-6 py-24 text-center">
@@ -92,7 +111,28 @@ export default function CommunicationPage() {
         interview guide — everything in one place when it matters.
       </p>
 
-      {!unlocked ? (
+      {!recordsReady ? (
+        <section className="card mt-6 p-6 text-center text-sm text-mist">
+          Loading your records from the cloud…
+        </section>
+      ) : recordsError ? (
+        <section
+          className="card mt-6 border-danger/40 bg-danger/5 p-6 text-center"
+          role="alert"
+        >
+          <span className="label">Records unavailable</span>
+          <p className="mt-2 text-sm text-danger">{recordsError}</p>
+          <button
+            type="button"
+            className="btn btn-ghost mt-4"
+            onClick={() => {
+              void loadRecords();
+            }}
+          >
+            Try again
+          </button>
+        </section>
+      ) : !unlocked ? (
         <section className="card mt-6 border-dashed p-6 text-center">
           <span className="label">Locked</span>
           <h2 className="mt-2 text-xl font-bold tracking-tight">

@@ -7,11 +7,15 @@ import {
   clearIntro,
   getIntroServerSnapshot,
   getIntroSnapshot,
+  getServerResolvedSnapshot,
   introSignature,
+  loadRecords,
+  recordsResolved,
   saveIntro,
   subscribeIntro,
 } from "@/lib/records";
 import {
+  authHeaders,
   getAuthSnapshot,
   getServerSnapshot as getAuthServerSnapshot,
   subscribeAuth,
@@ -36,12 +40,24 @@ export function SelfIntroCard({ profile }: { profile: StudentProfile | null }) {
     getIntroSnapshot,
     getIntroServerSnapshot,
   );
+  // Records live in the cloud now — don't decide "stale, regenerate" until
+  // the first load has landed (a local null is not proof there is no intro).
+  const recordsReady = useSyncExternalStore(
+    subscribeIntro,
+    recordsResolved,
+    getServerResolvedSnapshot,
+  );
 
   const [status, setStatus] = useState<"idle" | "generating" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
   const attemptedRef = useRef<string | null>(null);
+
+  // Kick off the cloud load (deduped with the pages hosting this card).
+  useEffect(() => {
+    void loadRecords();
+  }, []);
 
   const signature =
     student !== null && profile !== null ? introSignature(student.name, profile) : null;
@@ -53,6 +69,7 @@ export function SelfIntroCard({ profile }: { profile: StudentProfile | null }) {
   // remount), so an interrupted attempt can be retried on the next render.
   useEffect(() => {
     if (signature === null || student === null) return;
+    if (!recordsReady) return;
     if (fresh) return;
     if (attemptedRef.current === signature) return;
     attemptedRef.current = signature;
@@ -64,14 +81,15 @@ export function SelfIntroCard({ profile }: { profile: StudentProfile | null }) {
 
     (async () => {
       try {
+        const headers = await authHeaders();
         const res = await fetch("/api/intro", {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name: student.name, profile }),
+          headers: { "content-type": "application/json", ...headers },
+          body: JSON.stringify({ name: student.name, profile, signature }),
           signal: controller.signal,
         });
         const data = (await res.json().catch(() => null)) as
-          | { introduction?: string; error?: string }
+          | { introduction?: string; error?: string; persisted?: boolean }
           | null;
         if (controller.signal.aborted) return;
         if (!res.ok || !data?.introduction) {
@@ -85,7 +103,15 @@ export function SelfIntroCard({ profile }: { profile: StudentProfile | null }) {
         }
         done = true;
         saveIntro(data.introduction.trim(), signature);
-        setStatus("idle");
+        if (data.persisted === false) {
+          // Generated but the cloud save failed — show the text AND say so.
+          setStatus("error");
+          setError(
+            "Your introduction was generated, but saving it to your account failed — copy it now, then press Try again to save it.",
+          );
+        } else {
+          setStatus("idle");
+        }
       } catch (cause) {
         if (controller.signal.aborted) return;
         done = true;
@@ -103,7 +129,7 @@ export function SelfIntroCard({ profile }: { profile: StudentProfile | null }) {
       controller.abort();
       if (!done) attemptedRef.current = null;
     };
-  }, [signature, student, profile, fresh, retryTick]);
+  }, [signature, student, profile, fresh, recordsReady, retryTick]);
 
   async function copy(): Promise<void> {
     try {

@@ -8,6 +8,7 @@ import {
   signOut,
   subscribeAuth,
 } from "@/lib/auth";
+import { FOUNDER_EMAIL } from "@/lib/founder";
 
 /**
  * Header widget: "Sign in" when signed out, first name + sign out when in.
@@ -33,6 +34,11 @@ export function AccountChip() {
         <span className="size-1.5 rounded-full bg-accent" aria-hidden />
         {student.name.split(" ")[0]}
       </span>
+      {student.email.toLowerCase() === FOUNDER_EMAIL && (
+        <Link href="/founder" className="chip">
+          Founder
+        </Link>
+      )}
       <button
         type="button"
         className="chip"

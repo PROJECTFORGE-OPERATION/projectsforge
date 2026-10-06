@@ -53,6 +53,11 @@ let resolved = false;
  */
 let pendingName: string | null = null;
 let authInstance: Auth | null = null;
+/** First-onAuthStateChanged handshake — see whenAuthReady(). */
+let readyPromise: Promise<void> | null = null;
+let markReady: (() => void) | null = null;
+
+const AUTH_RESTORE_TIMEOUT_MS = 10_000;
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -105,6 +110,7 @@ function auth(): Auth | null {
     onAuthStateChanged(instance, (user) => {
       cache = user ? toStudent(user) : null;
       resolved = true;
+      markReady?.(); // first event = persisted session restored (or none)
       emit();
     });
     authInstance = instance;
@@ -178,6 +184,43 @@ export function getAuthSnapshot(): Student | null {
  */
 export function authResolved(): boolean {
   return typeof window !== "undefined" && resolved;
+}
+
+/**
+ * Resolves once Firebase has restored any persisted session (the first
+ * onAuthStateChanged) — callers that run at page mount must await this,
+ * because reading currentUser earlier races the asynchronous restore and
+ * mistakes a signed-in student for a signed-out one (that race silently
+ * emptied /result hydration, the Phase-1 migration and the unlock gate).
+ * Never hangs: if no answer comes within 10s it throws loud plain copy.
+ */
+export async function whenAuthReady(): Promise<void> {
+  // `resolved` covers every "state is known" path: the first onAuthStateChanged
+  // fired, or a direct signUp/signIn/signOut already decided it. Checking the
+  // flag (not just a registered resolver) is what prevents a 10s hang when the
+  // event beat us to the call.
+  if (resolved || typeof window === "undefined" || !configured()) return;
+  if (!readyPromise) {
+    readyPromise = new Promise<void>((resolve) => {
+      markReady = resolve;
+    });
+  }
+  auth(); // first caller starts the state listener if nothing else has
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new Error(
+          "Your session is taking too long to restore — reload the page and sign in again.",
+        ),
+      );
+    }, AUTH_RESTORE_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([readyPromise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function signUp(
@@ -254,6 +297,34 @@ export function signOut(): void {
   if (client) {
     firebaseSignOut(client).catch((cause) => console.error("[auth] signOut failed:", cause));
   }
+}
+
+/**
+ * ID token for the API (`Authorization: Bearer …`). Server routes verify it
+ * with the Admin SDK, so every cloud call knows which student is calling —
+ * there is no cookie of our own. Null when signed out or Firebase isn't set
+ * up; callers surface that loudly instead of sending an anonymous request.
+ */
+export async function getIdToken(): Promise<string | null> {
+  // Wait for the persisted session to be restored before reading currentUser
+  // — at mount, restoration is still in flight and a premature null would be
+  // indistinguishable from "signed out". Throws loud copy if it never lands.
+  await whenAuthReady();
+  const client = auth();
+  const user = client?.currentUser ?? null;
+  if (!user) return null;
+  try {
+    return await user.getIdToken();
+  } catch (cause) {
+    console.error("[auth] getIdToken failed:", cause);
+    return null;
+  }
+}
+
+/** Convenience wrapper: auth header map, or {} when there is no session. */
+export async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getIdToken();
+  return token ? { authorization: `Bearer ${token}` } : {};
 }
 
 /**

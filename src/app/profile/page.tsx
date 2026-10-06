@@ -27,6 +27,7 @@ import {
   getAuthSnapshot,
   getServerResolvedSnapshot,
   getServerSnapshot as getAuthServerSnapshot,
+  getIdToken,
   subscribeAuth,
 } from "@/lib/auth";
 import { Monogram } from "@/components/logo";
@@ -181,9 +182,15 @@ export default function ProfilePage() {
     setElapsed(0);
 
     try {
+      // The API identifies the student by their verified ID token; a missing
+      // session surfaces as the server's loud 401 copy in the error banner.
+      const token = await getIdToken();
       const res = await fetch("/api/analyze", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify(payload),
         // The API answers inside its 60s function cap; this only trips if the
         // connection itself hangs, so a stuck spinner can't run forever.
