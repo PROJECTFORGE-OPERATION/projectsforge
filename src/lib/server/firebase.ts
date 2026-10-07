@@ -14,6 +14,7 @@ import {
   MAX_STRONG_PER_YEAR,
 } from "@/lib/types";
 import { tierOf } from "@/lib/projects";
+import { FOUNDER_EMAIL } from "@/lib/founder";
 
 /**
  * Phase 2 backbone: Firestore through the Admin SDK.
@@ -667,5 +668,157 @@ export async function claimProject(
 
     const after = computeCounters(merged, completions, year);
     return { ok: true, claims: merged, counters: after, warning: capWarning(after) };
+  });
+}
+
+/** Plain display name for loud copy — never an empty "undefined". */
+function displayNameOf(data: Record<string, unknown>): string {
+  const name = typeof data.name === "string" ? data.name.trim() : "";
+  const email = typeof data.email === "string" ? data.email.trim() : "";
+  return name || email || "that student";
+}
+
+/**
+ * Move an allotment from one student to another — the exact action the 409
+ * copy already promises ("ask the founder to transfer it").
+ *
+ * Founder-only (checked here as well as in the route), then ONE transaction
+ * over the global `claims/{projectId}` doc plus BOTH student mirrors, so the
+ * uniqueness record and the per-student lists can never disagree:
+ *
+ *   1. 404 — the project isn't allotted to anyone
+ *   2. 400 — transferring to the student who already holds it
+ *   3. 404 — the recipient account doesn't exist
+ *   4. 409 — the owner already COMPLETED it (a finished project stays put)
+ *   5. 403 — the recipient's caps still apply; a transfer never exceeds them
+ *
+ * On success the recipient's copy is stamped with today's date — so it counts
+ * against THEIR yearly cap exactly like a fresh claim — while provenance
+ * fields record who held it before. Both students' counters recompute.
+ */
+export async function transferClaim(
+  user: ServerUser,
+  input: { projectId: string; title: string; toUid: string },
+): Promise<ClaimResult> {
+  if (user.email !== FOUNDER_EMAIL) {
+    return {
+      ok: false,
+      status: 403,
+      error:
+        "Project allotments can only be moved by the ProjectsForge founder account.",
+    };
+  }
+
+  const { projectId, toUid } = input;
+  const now = new Date();
+  const year = now.getFullYear();
+  const claimRef = claimsCollection().doc(projectId);
+  const toRef = studentDoc(toUid);
+
+  return db().runTransaction(async (tx): Promise<ClaimResult> => {
+    const claimSnap = await tx.get(claimRef);
+    if (!claimSnap.exists) {
+      return {
+        ok: false,
+        status: 404,
+        error: `“${input.title}” isn't allotted to anyone right now — it may already have been transferred. Reload the dashboard and try again.`,
+      };
+    }
+    const stored = (claimSnap.data() ?? {}) as Record<string, unknown>;
+    const title =
+      typeof stored.title === "string" && stored.title.trim()
+        ? stored.title
+        : input.title;
+    const fromUid = typeof stored.claimedBy === "string" ? stored.claimedBy : "";
+    if (!fromUid) {
+      return {
+        ok: false,
+        status: 404,
+        error: `“${title}” has no student recorded against it — reload the dashboard; if it keeps happening the claim record is damaged.`,
+      };
+    }
+    if (fromUid === toUid) {
+      return {
+        ok: false,
+        status: 400,
+        error: `“${title}” already belongs to that student — pick a different student to move it to.`,
+      };
+    }
+
+    const fromRef = studentDoc(fromUid);
+    const [fromSnap, toSnap] = await Promise.all([tx.get(fromRef), tx.get(toRef)]);
+    if (!toSnap.exists) {
+      return {
+        ok: false,
+        status: 404,
+        error:
+          "That student account doesn't exist in ProjectsForge — pick a student from the list and try again.",
+      };
+    }
+
+    const fromData = (fromSnap.data() ?? {}) as Record<string, unknown>;
+    const toData = (toSnap.data() ?? {}) as Record<string, unknown>;
+    const fromName = displayNameOf(fromData);
+    const toName = displayNameOf(toData);
+    const toClaims = asClaims(toData.claims);
+    const toCompletions = asComplections(toData.completions);
+
+    // 4. A completed project is documented work — it never moves.
+    if (asComplections(fromData.completions).some((entry) => entry.id === projectId)) {
+      return {
+        ok: false,
+        status: 409,
+        error: `“${title}” was already completed and documented by ${fromName} — a finished project stays with the student who built it.`,
+      };
+    }
+
+    // 5. The recipient's caps are re-checked exactly like a fresh claim.
+    const before = computeCounters(toClaims, toCompletions, year);
+    if (before.yearUsed >= before.yearMax) {
+      return {
+        ok: false,
+        status: 403,
+        error: `Transfer blocked: ${toName} is already at the limit of ${before.yearMax} projects for ${year} (${before.yearUsed}/${before.yearMax} used). New allotments open again in ${year + 1} — pick a student below the cap.`,
+      };
+    }
+    const tier = tierOf(projectId);
+    if (tier === "strong" && before.strongUsed >= before.strongMax) {
+      return {
+        ok: false,
+        status: 403,
+        error: `Transfer blocked: ${toName} already holds their one strong project for ${year} (${before.strongUsed}/${before.strongMax}). Strong projects are capped at one per year — send a normal project instead.`,
+      };
+    }
+
+    // Writes: global record + both mirrors, all in the same transaction.
+    const moved: ClaimRecord = {
+      projectId,
+      title,
+      tier,
+      claimedAt: now.toISOString(),
+    };
+    tx.set(claimRef, {
+      ...moved,
+      claimedBy: toUid,
+      claimedByEmail: typeof toData.email === "string" ? toData.email : "",
+      claimedByName: toName,
+      transferredAt: now.toISOString(),
+      transferredBy: user.email,
+      previousClaimedBy: fromUid,
+      previousClaimedByName: fromName,
+    });
+    tx.set(
+      fromRef,
+      {
+        claims: asClaims(fromData.claims).filter((entry) => entry.projectId !== projectId),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    const toMerged = [moved, ...toClaims];
+    tx.set(toRef, { claims: toMerged, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+
+    const after = computeCounters(toMerged, toCompletions, year);
+    return { ok: true, claims: toMerged, counters: after, warning: capWarning(after) };
   });
 }

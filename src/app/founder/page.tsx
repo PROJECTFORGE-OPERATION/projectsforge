@@ -43,6 +43,31 @@ function formatDate(iso: string | null): string {
 }
 
 /**
+ * One read path for the dashboard: used on first load AND after a transfer
+ * so the founder always sees cloud truth instead of an optimistic guess.
+ */
+async function fetchStudents(): Promise<FounderStudent[]> {
+  const token = await getIdToken();
+  if (!token) {
+    throw new Error("Sign in required — your session wasn't sent with this request.");
+  }
+  const res = await fetch("/api/founder", {
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(20_000),
+  });
+  const data = (await res.json().catch(() => null)) as
+    | { students?: FounderStudent[]; error?: string }
+    | null;
+  if (!res.ok || !data || !Array.isArray(data.students)) {
+    throw new Error(
+      (data && typeof data.error === "string" && data.error) ||
+        `The server returned ${res.status} without the student list.`,
+    );
+  }
+  return data.students;
+}
+
+/**
  * Founder dashboard — every student's profile, analysis and completion
  * records in one view. Client-side the email only hides the door; the real
  * gate is /api/founder, which checks the verified ID token's email.
@@ -76,25 +101,9 @@ export default function FounderPage() {
     let cancelled = false;
     (async () => {
       try {
-        const token = await getIdToken();
-        if (!token) {
-          throw new Error("Sign in required — your session wasn't sent with this request.");
-        }
-        const res = await fetch("/api/founder", {
-          headers: { authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(20_000),
-        });
-        const data = (await res.json().catch(() => null)) as
-          | { students?: FounderStudent[]; error?: string }
-          | null;
-        if (!res.ok || !data || !Array.isArray(data.students)) {
-          throw new Error(
-            (data && typeof data.error === "string" && data.error) ||
-              `The server returned ${res.status} without the student list.`,
-          );
-        }
+        const list = await fetchStudents();
         if (cancelled) return;
-        setStudents(data.students);
+        setStudents(list);
         setStatus("ready");
       } catch (cause) {
         if (cancelled) return;
@@ -106,6 +115,12 @@ export default function FounderPage() {
       cancelled = true;
     };
   }, [isFounder]);
+
+  /** Re-read the cloud after a successful transfer. */
+  async function handleTransferred(): Promise<void> {
+    const list = await fetchStudents();
+    setStudents(list);
+  }
 
   if (!authReady || !student) {
     return (
@@ -196,7 +211,12 @@ export default function FounderPage() {
           ) : (
             <div className="mt-6 space-y-4">
               {students.map((entry) => (
-                <StudentCard key={entry.uid} student={entry} />
+                <StudentCard
+                  key={entry.uid}
+                  student={entry}
+                  students={students}
+                  onTransferred={handleTransferred}
+                />
               ))}
             </div>
           )}
@@ -217,8 +237,91 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StudentCard({ student }: { student: FounderStudent }) {
+function StudentCard({
+  student,
+  students,
+  onTransferred,
+}: {
+  student: FounderStudent;
+  students: FounderStudent[];
+  onTransferred: () => Promise<void>;
+}) {
   const [open, setOpen] = useState(false);
+  /** Project currently being transferred (null = panel closed). */
+  const [transferId, setTransferId] = useState<string | null>(null);
+  const [recipient, setRecipient] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const others = students.filter((entry) => entry.uid !== student.uid);
+
+  function openTransfer(claim: ClaimRecord) {
+    setNotice(null);
+    setTransferError(null);
+    setRecipient(others[0]?.uid ?? "");
+    setTransferId(claim.projectId);
+  }
+
+  /**
+   * Founder transfer — POST, then a full cloud re-read. The server is the
+   * only source of truth: on refusal the loud plain-word copy is shown
+   * verbatim; on success the list refreshes so the row really disappears.
+   */
+  async function confirmTransfer(claim: ClaimRecord) {
+    if (!recipient) {
+      setTransferError("Pick a student to move this project to first.");
+      return;
+    }
+    setBusy(true);
+    setTransferError(null);
+    let moved = false;
+    try {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error("Sign in required — your session wasn't sent with this request.");
+      }
+      const res = await fetch("/api/founder/transfer", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          projectId: claim.projectId,
+          title: claim.title,
+          toUid: recipient,
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (!res.ok) {
+        throw new Error(
+          (data && typeof data.error === "string" && data.error) ||
+            `The server returned ${res.status} — nothing was moved.`,
+        );
+      }
+      moved = true;
+    } catch (cause) {
+      setTransferError(
+        cause instanceof Error ? cause.message : "The transfer couldn't be completed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+    if (!moved) return;
+
+    const to = others.find((entry) => entry.uid === recipient);
+    setNotice(`“${claim.title}” moved to ${to?.email ?? "that student"}.`);
+    setTransferId(null);
+    try {
+      await onTransferred();
+    } catch {
+      setTransferError(
+        "The project was moved, but the student list couldn't refresh — reload the page to see it.",
+      );
+    }
+  }
 
   return (
     <article className="card p-5">
@@ -302,6 +405,11 @@ function StudentCard({ student }: { student: FounderStudent }) {
 
           <div>
             <span className="label">Allotted projects (Phase 3)</span>
+            {notice && (
+              <p className="mt-1.5 text-xs text-accent" role="status">
+                {notice}
+              </p>
+            )}
             {student.claims.length === 0 ? (
               <p className="mt-1.5 text-xs text-mist">No project claimed yet.</p>
             ) : (
@@ -327,7 +435,72 @@ function StudentCard({ student }: { student: FounderStudent }) {
                       <span className="text-mist">
                         {formatDate(claim.claimedAt)}
                       </span>
+                      <button
+                        type="button"
+                        className="chip"
+                        disabled={busy}
+                        onClick={() =>
+                          transferId === claim.projectId
+                            ? setTransferId(null)
+                            : openTransfer(claim)
+                        }
+                      >
+                        {transferId === claim.projectId ? "Cancel" : "Transfer…"}
+                      </button>
                     </span>
+
+                    {transferId === claim.projectId && (
+                      <div
+                        className="w-full rounded-lg border border-accent/40 bg-panel-2/60 p-3"
+                        role="group"
+                        aria-label={`Transfer ${claim.title}`}
+                      >
+                        <span className="label">Move this project to</span>
+                        {others.length === 0 ? (
+                          <p className="mt-1.5 text-xs text-mist">
+                            No other student accounts yet — the transfer
+                            needs a second account to move to.
+                          </p>
+                        ) : (
+                          <>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <select
+                                className="field min-w-0 flex-1"
+                                value={recipient}
+                                onChange={(event) => setRecipient(event.target.value)}
+                                disabled={busy}
+                                aria-label="Student to receive the project"
+                              >
+                                <option value="">Choose a student…</option>
+                                {others.map((entry) => (
+                                  <option key={entry.uid} value={entry.uid}>
+                                    {entry.name} — {entry.email}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                className="btn btn-accent"
+                                disabled={busy || !recipient}
+                                onClick={() => confirmTransfer(claim)}
+                              >
+                                {busy ? "Moving…" : "Move project"}
+                              </button>
+                            </div>
+                            <p className="mt-1.5 text-[0.7rem] text-mist">
+                              Moves the allotment and both students&apos;
+                              counters in one transaction — caps are
+                              re-checked for the recipient first.
+                            </p>
+                          </>
+                        )}
+                        {transferError && (
+                          <p className="mt-2 text-xs text-danger" role="alert">
+                            {transferError}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

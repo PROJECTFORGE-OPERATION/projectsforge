@@ -299,6 +299,18 @@ export const claimRequestSchema = z.object({
 });
 export type ClaimRequest = z.infer<typeof claimRequestSchema>;
 
+/**
+ * Request body for POST /api/founder/transfer (founder-only). `title` is
+ * display copy for loud errors only — the tier, ownership and caps are all
+ * re-derived server-side from the claim doc and catalog, never trusted here.
+ */
+export const claimTransferSchema = z.object({
+  projectId: z.string().trim().min(1).max(200),
+  title: z.string().trim().min(1).max(300),
+  toUid: z.string().trim().min(1).max(128),
+});
+export type ClaimTransferRequest = z.infer<typeof claimTransferSchema>;
+
 /** Server-computed caps for the current year (defaults are the limits). */
 export interface YearCounters {
   year: number;
