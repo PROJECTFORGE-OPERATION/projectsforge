@@ -150,6 +150,17 @@ function authError(cause: unknown): string {
       return "That account has been disabled.";
     case "auth/operation-not-allowed":
       return "Email/Password sign-in isn't enabled in the Firebase console.";
+    case "auth/unauthorized-continue-uri": {
+      // Password reset returns to whatever origin requested it — Firebase
+      // refuses unless that domain is on the project's allowlist.
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "this address";
+      return (
+        `Password reset only works from approved domains, and ${origin} isn't one of them. ` +
+        `Request the link from https://projectsforge-nu.vercel.app instead — or, to make this ` +
+        `domain work, add it in Firebase Console → Authentication → Settings → Authorized domains.`
+      );
+    }
     default:
       return `Firebase Authentication failed${code ? ` (${code})` : ""} — ${message || "unknown error"}.`;
   }
